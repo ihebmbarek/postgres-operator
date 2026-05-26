@@ -31,6 +31,9 @@ type BackupSpec struct {
 	// BarmanUser is the SSH user used to connect to the Barman server.
 	BarmanUser string `json:"barmanUser,omitempty"`
 
+	// BarmanServerName is the server name configured on the Barman backup machine.
+	BarmanServerName string `json:"barmanServerName,omitempty"`
+
 	// SSHSecretName is the Kubernetes Secret containing the SSH private key for Barman access.
 	SSHSecretName string `json:"sshSecretName,omitempty"`
 

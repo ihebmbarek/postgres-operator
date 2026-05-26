@@ -67,6 +67,10 @@ spec:
                     description: BarmanHost is the IP address or hostname of the external
                       Barman backup server.
                     type: string
+                  barmanServerName:
+                    description: BarmanServerName is the server name configured on
+                      the Barman backup machine.
+                    type: string
                   barmanUser:
                     description: BarmanUser is the SSH user used to connect to the
                       Barman server.

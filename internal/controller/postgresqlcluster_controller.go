@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -227,6 +228,43 @@ func (r *PostgreSQLClusterReconciler) buildConfigMap(
 	cluster *databasev1.PostgreSQLCluster,
 	labels map[string]string,
 ) *corev1.ConfigMap {
+	archiveTimeout := cluster.Spec.Backup.ArchiveTimeout
+	if archiveTimeout == 0 {
+		archiveTimeout = 60
+	}
+
+	customConfig := `listen_addresses = '*'
+wal_level = replica
+archive_mode = off
+max_wal_senders = 5
+archive_timeout = 60
+`
+
+	if cluster.Spec.Backup.Enabled {
+		barmanUser := cluster.Spec.Backup.BarmanUser
+		if barmanUser == "" {
+			barmanUser = "barman"
+		}
+
+		barmanServerName := cluster.Spec.Backup.BarmanServerName
+		if barmanServerName == "" {
+			barmanServerName = cluster.Name
+		}
+
+		customConfig = fmt.Sprintf(`listen_addresses = '*'
+wal_level = replica
+archive_mode = on
+max_wal_senders = 5
+archive_timeout = %d
+archive_command = 'BARMAN_SSH_COMMAND="ssh -i /tmp/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" barman-wal-archive %s@%s %s %%p'
+`,
+			archiveTimeout,
+			barmanUser,
+			cluster.Spec.Backup.BarmanHost,
+			barmanServerName,
+		)
+	}
+
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cluster.Name + "-config",
@@ -234,12 +272,7 @@ func (r *PostgreSQLClusterReconciler) buildConfigMap(
 			Labels:    labels,
 		},
 		Data: map[string]string{
-			"custom.conf": `listen_addresses = '*'
-wal_level = replica
-archive_mode = off
-max_wal_senders = 5
-archive_timeout = 60
-`,
+			"custom.conf": customConfig,
 		},
 	}
 }
@@ -280,6 +313,50 @@ func (r *PostgreSQLClusterReconciler) buildStatefulSet(
 	replicas := int32(1)
 	credentialsSecretName := cluster.Name + "-credentials"
 	configMapName := cluster.Name + "-config"
+
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "postgres-storage",
+			MountPath: "/var/lib/postgresql/data",
+		},
+		{
+			Name:      "postgres-config",
+			MountPath: "/etc/postgresql/custom.conf",
+			SubPath:   "custom.conf",
+		},
+	}
+
+	volumes := []corev1.Volume{
+		{
+			Name: "postgres-config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: configMapName,
+					},
+				},
+			},
+		},
+	}
+
+	if cluster.Spec.Backup.Enabled && cluster.Spec.Backup.SSHSecretName != "" {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "barman-ssh-key",
+			MountPath: "/tmp/.ssh/id_ed25519",
+			SubPath:   "id_ed25519",
+			ReadOnly:  true,
+		})
+
+		volumes = append(volumes, corev1.Volume{
+			Name: "barman-ssh-key",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  cluster.Spec.Backup.SSHSecretName,
+					DefaultMode: int32Ptr(0440),
+				},
+			},
+		})
+	}
 
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -395,31 +472,10 @@ func (r *PostgreSQLClusterReconciler) buildStatefulSet(
 									Value: "/var/lib/postgresql/data/pgdata",
 								},
 							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "postgres-storage",
-									MountPath: "/var/lib/postgresql/data",
-								},
-								{
-									Name:      "postgres-config",
-									MountPath: "/etc/postgresql/custom.conf",
-									SubPath:   "custom.conf",
-								},
-							},
+							VolumeMounts: volumeMounts,
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "postgres-config",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: configMapName,
-									},
-								},
-							},
-						},
-					},
+					Volumes: volumes,
 				},
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
@@ -442,6 +498,10 @@ func (r *PostgreSQLClusterReconciler) buildStatefulSet(
 			},
 		},
 	}
+}
+
+func int32Ptr(i int32) *int32 {
+	return &i
 }
 
 func (r *PostgreSQLClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {

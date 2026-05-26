@@ -186,6 +186,14 @@ func (r *PostgreSQLClusterReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
+	if cluster.Spec.Backup.Enabled {
+		cluster.Status.BackupEnabled = true
+		cluster.Status.BackupPhase = "Configured"
+	} else {
+		cluster.Status.BackupEnabled = false
+		cluster.Status.BackupPhase = "Disabled"
+	}
+
 	if err := r.Status().Update(ctx, &cluster); err != nil {
 		log.Error(err, "Failed to update PostgreSQLCluster status")
 		return ctrl.Result{}, err

@@ -14,7 +14,23 @@ spec:
     singular: postgresqlcluster
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .status.postgresPod
+      name: Postgres Pod
+      type: string
+    - jsonPath: .status.backupEnabled
+      name: Backup
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: PostgreSQLCluster is the Schema for the postgresqlclusters API.
@@ -39,6 +55,31 @@ spec:
           spec:
             description: PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
             properties:
+              backup:
+                description: Backup defines the optional Barman backup configuration.
+                properties:
+                  archiveTimeout:
+                    description: ArchiveTimeout defines how often PostgreSQL should
+                      force WAL segment switching, in seconds.
+                    format: int32
+                    type: integer
+                  barmanHost:
+                    description: BarmanHost is the IP address or hostname of the external
+                      Barman backup server.
+                    type: string
+                  barmanUser:
+                    description: BarmanUser is the SSH user used to connect to the
+                      Barman server.
+                    type: string
+                  enabled:
+                    description: Enabled indicates whether Barman backup integration
+                      is enabled.
+                    type: boolean
+                  sshSecretName:
+                    description: SSHSecretName is the Kubernetes Secret containing
+                      the SSH private key for Barman access.
+                    type: string
+                type: object
               cpuLimit:
                 type: string
               cpuRequest:
@@ -63,6 +104,14 @@ spec:
           status:
             description: PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
             properties:
+              backupEnabled:
+                description: BackupEnabled indicates whether backup configuration
+                  is enabled.
+                type: boolean
+              backupPhase:
+                description: BackupPhase describes the current backup configuration
+                  state.
+                type: string
               phase:
                 type: string
               postgresPod:

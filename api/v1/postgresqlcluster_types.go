@@ -20,8 +20,23 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// BackupSpec defines the Barman backup configuration for PostgreSQL.
+type BackupSpec struct {
+	// Enabled indicates whether Barman backup integration is enabled.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// BarmanHost is the IP address or hostname of the external Barman backup server.
+	BarmanHost string `json:"barmanHost,omitempty"`
+
+	// BarmanUser is the SSH user used to connect to the Barman server.
+	BarmanUser string `json:"barmanUser,omitempty"`
+
+	// SSHSecretName is the Kubernetes Secret containing the SSH private key for Barman access.
+	SSHSecretName string `json:"sshSecretName,omitempty"`
+
+	// ArchiveTimeout defines how often PostgreSQL should force WAL segment switching, in seconds.
+	ArchiveTimeout int32 `json:"archiveTimeout,omitempty"`
+}
 
 // PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
 type PostgreSQLClusterSpec struct {
@@ -44,6 +59,9 @@ type PostgreSQLClusterSpec struct {
 	MemoryRequest string `json:"memoryRequest,omitempty"`
 
 	MemoryLimit string `json:"memoryLimit,omitempty"`
+
+	// Backup defines the optional Barman backup configuration.
+	Backup BackupSpec `json:"backup,omitempty"`
 }
 
 // PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
@@ -53,10 +71,21 @@ type PostgreSQLClusterStatus struct {
 	Ready bool `json:"ready,omitempty"`
 
 	PostgresPod string `json:"postgresPod,omitempty"`
+
+	// BackupEnabled indicates whether backup configuration is enabled.
+	BackupEnabled bool `json:"backupEnabled,omitempty"`
+
+	// BackupPhase describes the current backup configuration state.
+	BackupPhase string `json:"backupPhase,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
+// +kubebuilder:printcolumn:name="Postgres Pod",type=string,JSONPath=`.status.postgresPod`
+// +kubebuilder:printcolumn:name="Backup",type=boolean,JSONPath=`.status.backupEnabled`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // PostgreSQLCluster is the Schema for the postgresqlclusters API.
 type PostgreSQLCluster struct {

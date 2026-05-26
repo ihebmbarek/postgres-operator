@@ -17,3 +17,10 @@ spec:
   cpuLimit: "500m"
   memoryRequest: "256Mi"
   memoryLimit: "512Mi"
+  
+  backup:
+    enabled: true
+    barmanHost: "192.168.180.54"
+    barmanUser: "barman"
+    sshSecretName: "barman-ssh-key"
+    archiveTimeout: 60

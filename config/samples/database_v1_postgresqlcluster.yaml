@@ -1,0 +1,19 @@
+apiVersion: database.iheb.local/v1
+kind: PostgreSQLCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: postgres-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: sample-postgres
+spec:
+  postgresVersion: "16"
+  image: "postgres:16"
+  database: "appdb"
+  user: "appuser"
+  storageSize: "5Gi"
+  storageClassName: "nfs-client"
+
+  cpuRequest: "250m"
+  cpuLimit: "500m"
+  memoryRequest: "256Mi"
+  memoryLimit: "512Mi"

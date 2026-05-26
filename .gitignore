@@ -1,0 +1,29 @@
+# Binaries
+bin/
+manager
+*.exe
+*.out
+
+# Go
+vendor/
+*.test
+coverage.out
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Kubernetes local/runtime files
+kubeconfig
+.kube/
+*.log
+
+# Secrets and credentials
+*.key
+*.pem
+*.crt
+*.env
+.env

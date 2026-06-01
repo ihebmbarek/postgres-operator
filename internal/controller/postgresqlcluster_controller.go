@@ -178,6 +178,7 @@ func (r *PostgreSQLClusterReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		cluster.Status.PostgresPod = podName
 	} else {
 		cluster.Status.PostgresPod = podName
+
 		if postgresPod.Status.Phase == corev1.PodRunning {
 			cluster.Status.Phase = "Running"
 			cluster.Status.Ready = true
@@ -256,7 +257,7 @@ wal_level = replica
 archive_mode = on
 max_wal_senders = 5
 archive_timeout = %d
-archive_command = 'BARMAN_SSH_COMMAND="ssh -i /tmp/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" barman-wal-archive %s@%s %s %%p'
+archive_command = 'cp /tmp/.ssh/id_ed25519 /tmp/id_ed25519 && chmod 600 /tmp/id_ed25519 && BARMAN_SSH_COMMAND="ssh -i /tmp/id_ed25519 -l %s -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o BatchMode=yes" barman-wal-archive %s %s %%p'
 `,
 			archiveTimeout,
 			barmanUser,
@@ -277,7 +278,10 @@ archive_command = 'BARMAN_SSH_COMMAND="ssh -i /tmp/.ssh/id_ed25519 -o StrictHost
 	}
 }
 
-func (r *PostgreSQLClusterReconciler) buildService(cluster *databasev1.PostgreSQLCluster, labels map[string]string) *corev1.Service {
+func (r *PostgreSQLClusterReconciler) buildService(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) *corev1.Service {
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cluster.Name,

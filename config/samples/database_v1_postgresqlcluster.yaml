@@ -22,6 +22,6 @@ spec:
     enabled: true
     barmanHost: "192.168.180.54"
     barmanUser: "barman"
-    barmanServerName: "ocp-alpha"
+    barmanServerName: "sample-postgres"
     sshSecretName: "barman-ssh-key"
     archiveTimeout: 60

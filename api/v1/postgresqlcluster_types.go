@@ -39,6 +39,16 @@ type BackupSpec struct {
 
 	// ArchiveTimeout defines how often PostgreSQL should force WAL segment switching, in seconds.
 	ArchiveTimeout int32 `json:"archiveTimeout,omitempty"`
+
+	// ExposeService indicates whether the operator should create
+	// an external NodePort Service for the Barman server.
+	ExposeService bool `json:"exposeService,omitempty"`
+
+	// NodePort is the external port exposed on each OpenShift node
+	// for Barman database and streaming connections.
+	// +kubebuilder:validation:Minimum=30000
+	// +kubebuilder:validation:Maximum=32767
+	NodePort int32 `json:"nodePort,omitempty"`
 }
 
 // PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
@@ -80,6 +90,13 @@ type PostgreSQLClusterStatus struct {
 
 	// BackupPhase describes the current backup configuration state.
 	BackupPhase string `json:"backupPhase,omitempty"`
+
+	BarmanService  string `json:"barmanService,omitempty"`
+	BarmanNodePort int32  `json:"barmanNodePort,omitempty"`
+
+	LastBackupStatus string       `json:"lastBackupStatus,omitempty"`
+	LastBackupTime   *metav1.Time `json:"lastBackupTime,omitempty"`
+	LastBackupID     string       `json:"lastBackupId,omitempty"`
 }
 
 // +kubebuilder:object:root=true

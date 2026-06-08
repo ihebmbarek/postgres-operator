@@ -79,6 +79,19 @@ spec:
                     description: Enabled indicates whether Barman backup integration
                       is enabled.
                     type: boolean
+                  exposeService:
+                    description: |-
+                      ExposeService indicates whether the operator should create
+                      an external NodePort Service for the Barman server.
+                    type: boolean
+                  nodePort:
+                    description: |-
+                      NodePort is the external port exposed on each OpenShift node
+                      for Barman database and streaming connections.
+                    format: int32
+                    maximum: 32767
+                    minimum: 30000
+                    type: integer
                   sshSecretName:
                     description: SSHSecretName is the Kubernetes Secret containing
                       the SSH private key for Barman access.
@@ -115,6 +128,18 @@ spec:
               backupPhase:
                 description: BackupPhase describes the current backup configuration
                   state.
+                type: string
+              barmanNodePort:
+                format: int32
+                type: integer
+              barmanService:
+                type: string
+              lastBackupId:
+                type: string
+              lastBackupStatus:
+                type: string
+              lastBackupTime:
+                format: date-time
                 type: string
               phase:
                 type: string

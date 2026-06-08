@@ -25,3 +25,5 @@ spec:
     barmanServerName: "sample-postgres"
     sshSecretName: "barman-ssh-key"
     archiveTimeout: 60
+    exposeService: true
+    nodePort: 30433

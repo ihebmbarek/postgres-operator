@@ -27,3 +27,6 @@ kubeconfig
 *.crt
 *.env
 .env
+
+# Local backup files
+*.backup

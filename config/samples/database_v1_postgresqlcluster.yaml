@@ -27,6 +27,11 @@ spec:
     archiveTimeout: 60
     exposeService: true
     nodePort: 30433
+    replicationAllowedCIDR: "192.168.180.54/32"
+    streamingUser: "streaming_barman"
     schedule: "0 2 * * *"
     suspendScheduledBackups: false
     backupImage: quay.io/iheb_mbarek/postgres-barman:latest
+
+  restore:
+    enabled: false

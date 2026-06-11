@@ -1871,6 +1871,14 @@ tar -C "$DEST" -cf - .`,
 		shellQuote(targetAction),
 	)
 
+	remoteCommandEncoded := base64.StdEncoding.EncodeToString(
+		[]byte(remoteCommand),
+	)
+
+	remoteInvocation := "printf %s " +
+		remoteCommandEncoded +
+		" | base64 -d | bash"
+
 	command := fmt.Sprintf(
 		`set -euo pipefail
 
@@ -1940,7 +1948,7 @@ echo "RESTORE_JOB_OK"
 		preserveExistingData,
 		shellQuote(barmanUser),
 		shellQuote(cluster.Spec.Backup.BarmanHost),
-		shellQuote(remoteCommand),
+		shellQuote(remoteInvocation),
 	)
 
 	restoreLabels := map[string]string{}

@@ -69,7 +69,7 @@ type PostgreSQLClusterReconciler struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 
 func (r *PostgreSQLClusterReconciler) Reconcile(
 	ctx context.Context,
@@ -245,6 +245,16 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 
+	if cluster.Spec.Restore.Enabled {
+		return r.reconcileRestoreWorkflow(
+			ctx,
+			&cluster,
+			statefulSet,
+			labels,
+			image,
+		)
+	}
+
 	if err := r.reconcileStatefulSet(
 		ctx,
 		statefulSet,
@@ -328,6 +338,13 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		cluster.Status.LastBackupID = ""
 		cluster.Status.BackupCronJob = ""
 		cluster.Status.BackupSchedule = ""
+	}
+
+	if !cluster.Spec.Restore.Enabled {
+		cluster.Status.RestoreEnabled = false
+		cluster.Status.RestorePhase = "Disabled"
+		cluster.Status.RestoreMessage = "restore is disabled"
+		cluster.Status.RestoreJob = ""
 	}
 
 	if !reflect.DeepEqual(
@@ -1345,6 +1362,718 @@ exit 1
 	}
 }
 
+func (r *PostgreSQLClusterReconciler) reconcileRestoreWorkflow(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	desiredStatefulSet *appsv1.StatefulSet,
+	labels map[string]string,
+	defaultImage string,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	if err := validateRestoreRequest(cluster); err != nil {
+		if statusErr := r.updateRestoreStatus(
+			ctx,
+			cluster,
+			"Blocked",
+			err.Error(),
+			"",
+		); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+
+		return ctrl.Result{
+			RequeueAfter: 30 * time.Second,
+		}, nil
+	}
+
+	jobName := restoreJobName(cluster)
+
+	if cluster.Status.ObservedRestoreRequestID ==
+		cluster.Spec.Restore.RequestID &&
+		cluster.Status.RestorePhase == "Completed" {
+		return ctrl.Result{}, nil
+	}
+
+	pvcName := postgresPVCName(cluster)
+
+	var postgresPVC corev1.PersistentVolumeClaim
+	if err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      pvcName,
+			Namespace: cluster.Namespace,
+		},
+		&postgresPVC,
+	); err != nil {
+		message := fmt.Sprintf(
+			"failed to retrieve PostgreSQL PVC %q: %v",
+			pvcName,
+			err,
+		)
+
+		if statusErr := r.updateRestoreStatus(
+			ctx,
+			cluster,
+			"Blocked",
+			message,
+			jobName,
+		); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+
+		return ctrl.Result{
+			RequeueAfter: 30 * time.Second,
+		}, nil
+	}
+
+	var restoreJob batchv1.Job
+	jobErr := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      jobName,
+			Namespace: cluster.Namespace,
+		},
+		&restoreJob,
+	)
+
+	if jobErr == nil {
+		if restoreJob.Status.Failed > 0 {
+			message := fmt.Sprintf(
+				"restore Job %q failed; inspect its logs",
+				jobName,
+			)
+
+			if err := r.updateRestoreStatus(
+				ctx,
+				cluster,
+				"Failed",
+				message,
+				jobName,
+			); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{}, nil
+		}
+
+		if restoreJob.Status.Succeeded > 0 {
+			if err := r.ensureStatefulSetReplicas(
+				ctx,
+				desiredStatefulSet,
+				1,
+			); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			var postgresPod corev1.Pod
+			podErr := r.Get(
+				ctx,
+				client.ObjectKey{
+					Name:      cluster.Name + "-0",
+					Namespace: cluster.Namespace,
+				},
+				&postgresPod,
+			)
+
+			if apierrors.IsNotFound(podErr) ||
+				(podErr == nil &&
+					!isPodReady(&postgresPod)) {
+				if err := r.updateRestoreStatus(
+					ctx,
+					cluster,
+					"StartingPostgreSQL",
+					"restore Job completed; waiting for PostgreSQL to become Ready",
+					jobName,
+				); err != nil {
+					return ctrl.Result{}, err
+				}
+
+				return ctrl.Result{
+					RequeueAfter: 5 * time.Second,
+				}, nil
+			}
+
+			if podErr != nil {
+				return ctrl.Result{}, podErr
+			}
+
+			now := metav1.Now()
+			cluster.Status.LastRestoreTime = &now
+
+			if err := r.updateRestoreStatus(
+				ctx,
+				cluster,
+				"Completed",
+				"restore completed successfully; disable spec.restore.enabled to resume normal operation",
+				jobName,
+			); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			log.Info(
+				"PostgreSQL PITR restore completed successfully",
+				"requestId",
+				cluster.Spec.Restore.RequestID,
+				"job",
+				jobName,
+			)
+
+			return ctrl.Result{}, nil
+		}
+
+		if err := r.ensureStatefulSetReplicas(
+			ctx,
+			desiredStatefulSet,
+			0,
+		); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := r.updateRestoreStatus(
+			ctx,
+			cluster,
+			"Restoring",
+			"restore Job is running",
+			jobName,
+		); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
+	if !apierrors.IsNotFound(jobErr) {
+		return ctrl.Result{}, jobErr
+	}
+
+	if err := r.ensureStatefulSetReplicas(
+		ctx,
+		desiredStatefulSet,
+		0,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	var postgresPod corev1.Pod
+	podErr := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      cluster.Name + "-0",
+			Namespace: cluster.Namespace,
+		},
+		&postgresPod,
+	)
+
+	if podErr == nil {
+		if err := r.updateRestoreStatus(
+			ctx,
+			cluster,
+			"ScalingDown",
+			"waiting for the active PostgreSQL Pod to terminate before restoring the PVC",
+			jobName,
+		); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
+	if !apierrors.IsNotFound(podErr) {
+		return ctrl.Result{}, podErr
+	}
+
+	desiredRestoreJob, err := r.buildRestoreJob(
+		cluster,
+		labels,
+		defaultImage,
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := ctrl.SetControllerReference(
+		cluster,
+		desiredRestoreJob,
+		r.Scheme,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	log.Info(
+		"Creating PostgreSQL PITR restore Job",
+		"name",
+		desiredRestoreJob.Name,
+		"requestId",
+		cluster.Spec.Restore.RequestID,
+		"backupId",
+		cluster.Spec.Restore.BackupID,
+	)
+
+	if err := r.Create(
+		ctx,
+		desiredRestoreJob,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.updateRestoreStatus(
+		ctx,
+		cluster,
+		"Restoring",
+		"restore Job created",
+		jobName,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{
+		RequeueAfter: 5 * time.Second,
+	}, nil
+}
+
+func validateRestoreRequest(
+	cluster *databasev1.PostgreSQLCluster,
+) error {
+	if !cluster.Spec.Backup.Enabled {
+		return fmt.Errorf(
+			"spec.backup.enabled must be true before requesting a restore",
+		)
+	}
+
+	if cluster.Spec.Restore.RequestID == "" {
+		return fmt.Errorf(
+			"spec.restore.requestId must not be empty",
+		)
+	}
+
+	if !regexp.MustCompile(
+		`^[a-z0-9][a-z0-9-]*$`,
+	).MatchString(
+		cluster.Spec.Restore.RequestID,
+	) {
+		return fmt.Errorf(
+			"invalid spec.restore.requestId %q",
+			cluster.Spec.Restore.RequestID,
+		)
+	}
+
+	expectedConfirmation := "RESTORE " + cluster.Name
+	if cluster.Spec.Restore.Confirmation !=
+		expectedConfirmation {
+		return fmt.Errorf(
+			"spec.restore.confirmation must equal %q",
+			expectedConfirmation,
+		)
+	}
+
+	if cluster.Spec.Restore.BackupID == "" {
+		return fmt.Errorf(
+			"spec.restore.backupId must not be empty",
+		)
+	}
+
+	if !barmanServerNamePattern.MatchString(
+		cluster.Spec.Restore.BackupID,
+	) {
+		return fmt.Errorf(
+			"invalid spec.restore.backupId %q",
+			cluster.Spec.Restore.BackupID,
+		)
+	}
+
+	if cluster.Spec.Restore.TargetTime == nil {
+		return fmt.Errorf(
+			"spec.restore.targetTime must not be empty",
+		)
+	}
+
+	targetAction := effectiveRestoreTargetAction(
+		cluster,
+	)
+
+	if targetAction != "promote" {
+		return fmt.Errorf(
+			"only spec.restore.targetAction=promote is supported by the current automated workflow",
+		)
+	}
+
+	if cluster.Spec.Backup.SSHSecretName == "" {
+		return fmt.Errorf(
+			"spec.backup.sshSecretName must not be empty",
+		)
+	}
+
+	return nil
+}
+
+func effectiveRestoreTargetAction(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	targetAction := cluster.Spec.Restore.TargetAction
+	if targetAction == "" {
+		targetAction = "promote"
+	}
+
+	return targetAction
+}
+
+func postgresPVCName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return "postgres-storage-" + cluster.Name + "-0"
+}
+
+func restoreJobName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	name := cluster.Name +
+		"-restore-" +
+		cluster.Spec.Restore.RequestID
+
+	if len(name) <= 63 {
+		return name
+	}
+
+	name = strings.TrimRight(
+		name[:63],
+		"-",
+	)
+
+	return name
+}
+
+func isPodReady(
+	pod *corev1.Pod,
+) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady &&
+			condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (r *PostgreSQLClusterReconciler) ensureStatefulSetReplicas(
+	ctx context.Context,
+	desiredStatefulSet *appsv1.StatefulSet,
+	replicas int32,
+) error {
+	statefulSet := desiredStatefulSet.DeepCopy()
+	statefulSet.Spec.Replicas = int32Ptr(
+		replicas,
+	)
+
+	return r.reconcileStatefulSet(
+		ctx,
+		statefulSet,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) updateRestoreStatus(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	phase string,
+	message string,
+	jobName string,
+) error {
+	originalStatus := cluster.Status
+
+	cluster.Status.RestoreEnabled =
+		cluster.Spec.Restore.Enabled
+
+	cluster.Status.ObservedRestoreRequestID =
+		cluster.Spec.Restore.RequestID
+
+	cluster.Status.RestorePhase = phase
+	cluster.Status.RestoreMessage = message
+	cluster.Status.RestoreJob = jobName
+	cluster.Status.RestoreBackupID =
+		cluster.Spec.Restore.BackupID
+
+	cluster.Status.RestoreTargetTime =
+		cluster.Spec.Restore.TargetTime
+
+	if reflect.DeepEqual(
+		originalStatus,
+		cluster.Status,
+	) {
+		return nil
+	}
+
+	return r.Status().Update(
+		ctx,
+		cluster,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) buildRestoreJob(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	defaultImage string,
+) (*batchv1.Job, error) {
+	restoreImage := cluster.Spec.Restore.RestoreImage
+	if restoreImage == "" {
+		restoreImage = cluster.Spec.Backup.BackupImage
+	}
+
+	if restoreImage == "" {
+		restoreImage = defaultImage
+	}
+
+	barmanUser := cluster.Spec.Backup.BarmanUser
+	if barmanUser == "" {
+		barmanUser = "barman"
+	}
+
+	barmanServerName := cluster.Spec.Backup.BarmanServerName
+	if barmanServerName == "" {
+		barmanServerName = cluster.Name
+	}
+
+	targetAction := effectiveRestoreTargetAction(
+		cluster,
+	)
+
+	targetTime := cluster.Spec.Restore.TargetTime.
+		Time.
+		Format(
+			time.RFC3339Nano,
+		)
+
+	preserveExistingData := "false"
+	if cluster.Spec.Restore.PreserveExistingData {
+		preserveExistingData = "true"
+	}
+
+	remoteCommand := fmt.Sprintf(
+		`set -e
+DEST="$(mktemp -d /tmp/%s-restore.XXXXXX)"
+trap 'rm -rf "$DEST"' EXIT
+barman recover %s %s "$DEST" \
+  --target-time %s \
+  --target-action %s >&2
+tar -C "$DEST" -cf - .`,
+		cluster.Name,
+		shellQuote(barmanServerName),
+		shellQuote(cluster.Spec.Restore.BackupID),
+		shellQuote(targetTime),
+		shellQuote(targetAction),
+	)
+
+	command := fmt.Sprintf(
+		`set -euo pipefail
+
+echo "Starting operator-managed PostgreSQL PITR restore"
+echo "Runtime identity:"
+id
+
+PGROOT="/var/lib/postgresql/data"
+PGDATA="${PGROOT}/pgdata"
+REQUEST_ID=%s
+PRESERVE_EXISTING_DATA=%s
+
+if [ -d "${PGDATA}" ]; then
+  if [ "${PRESERVE_EXISTING_DATA}" = "true" ]; then
+    PRESERVED="${PGROOT}/pgdata.before-${REQUEST_ID}"
+    rm -rf "${PRESERVED}"
+    mv "${PGDATA}" "${PRESERVED}"
+    echo "Existing PGDATA preserved at ${PRESERVED}"
+  else
+    rm -rf "${PGDATA}"
+  fi
+fi
+
+mkdir -p "${PGDATA}"
+
+ssh \
+  -i /etc/barman-ssh/id_ed25519 \
+  -l %s \
+  -o UserKnownHostsFile=/etc/barman-ssh/known_hosts \
+  -o StrictHostKeyChecking=yes \
+  -o IdentitiesOnly=yes \
+  -o PreferredAuthentications=publickey \
+  -o PasswordAuthentication=no \
+  -o BatchMode=yes \
+  %s \
+  %s \
+| tar \
+    -C "${PGDATA}" \
+    --no-same-owner \
+    --no-same-permissions \
+    --touch \
+    --no-overwrite-dir \
+    --strip-components=1 \
+    -xf -
+
+test -f "${PGDATA}/PG_VERSION"
+
+sed -i \
+  "s#^restore_command = .*#restore_command = 'cp ${PGDATA}/barman_wal/%%f %%p'#" \
+  "${PGDATA}/postgresql.auto.conf"
+
+touch "${PGDATA}/recovery.signal"
+
+chmod -R u+rwX "${PGDATA}"
+chmod 0700 "${PGDATA}"
+
+echo
+echo "Recovery configuration:"
+grep -nE \
+  'restore_command|recovery_target_time|recovery_target_action' \
+  "${PGDATA}/postgresql.auto.conf"
+
+echo
+echo "RESTORE_JOB_OK"
+`,
+		shellQuote(cluster.Spec.Restore.RequestID),
+		preserveExistingData,
+		shellQuote(barmanUser),
+		shellQuote(cluster.Spec.Backup.BarmanHost),
+		shellQuote(remoteCommand),
+	)
+
+	restoreLabels := map[string]string{}
+	for key, value := range labels {
+		restoreLabels[key] = value
+	}
+
+	restoreLabels["app.kubernetes.io/component"] =
+		"restore"
+
+	restoreLabels["database.iheb.local/restore-request"] =
+		cluster.Spec.Restore.RequestID
+
+	ttlSecondsAfterFinished := int32(
+		3600,
+	)
+
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      restoreJobName(cluster),
+			Namespace: cluster.Namespace,
+			Labels:    restoreLabels,
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit: int32Ptr(
+				0,
+			),
+			TTLSecondsAfterFinished: &ttlSecondsAfterFinished,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: restoreLabels,
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:            "restore",
+							Image:           restoreImage,
+							ImagePullPolicy: corev1.PullAlways,
+							Command: []string{
+								"/bin/bash",
+								"-lc",
+							},
+							Args: []string{
+								command,
+							},
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU: resource.MustParse(
+										"50m",
+									),
+									corev1.ResourceMemory: resource.MustParse(
+										"64Mi",
+									),
+								},
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU: resource.MustParse(
+										"500m",
+									),
+									corev1.ResourceMemory: resource.MustParse(
+										"512Mi",
+									),
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "postgres-storage",
+									MountPath: "/var/lib/postgresql/data",
+								},
+								{
+									Name:      "barman-ssh",
+									MountPath: barmanSSHRuntimeDirectory,
+									ReadOnly:  true,
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "postgres-storage",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: postgresPVCName(
+										cluster,
+									),
+								},
+							},
+						},
+						{
+							Name: "barman-ssh",
+							VolumeSource: corev1.VolumeSource{
+								Projected: &corev1.ProjectedVolumeSource{
+									DefaultMode: int32Ptr(
+										0400,
+									),
+									Sources: []corev1.VolumeProjection{
+										{
+											Secret: &corev1.SecretProjection{
+												LocalObjectReference: corev1.LocalObjectReference{
+													Name: cluster.Spec.Backup.SSHSecretName,
+												},
+												Items: []corev1.KeyToPath{
+													{
+														Key:  "id_ed25519",
+														Path: "id_ed25519",
+													},
+												},
+											},
+										},
+										{
+											ConfigMap: &corev1.ConfigMapProjection{
+												LocalObjectReference: corev1.LocalObjectReference{
+													Name: barmanKnownHostsConfigMap,
+												},
+												Items: []corev1.KeyToPath{
+													{
+														Key:  "known_hosts",
+														Path: "known_hosts",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
 func (r *PostgreSQLClusterReconciler) reconcileStatefulSet(
 	ctx context.Context,
 	desiredStatefulSet *appsv1.StatefulSet,
@@ -1789,7 +2518,10 @@ exit 1
 		Spec: batchv1.CronJobSpec{
 			Schedule:          cluster.Spec.Backup.Schedule,
 			ConcurrencyPolicy: batchv1.ForbidConcurrent,
-			Suspend:           boolPtr(cluster.Spec.Backup.SuspendScheduledBackups),
+			Suspend: boolPtr(
+				cluster.Spec.Backup.SuspendScheduledBackups ||
+					cluster.Spec.Restore.Enabled,
+			),
 			SuccessfulJobsHistoryLimit: int32Ptr(
 				3,
 			),
@@ -2255,6 +2987,9 @@ func (r *PostgreSQLClusterReconciler) SetupWithManager(
 		).
 		Owns(
 			&batchv1.CronJob{},
+		).
+		Owns(
+			&batchv1.Job{},
 		).
 		Named(
 			"postgresqlcluster",

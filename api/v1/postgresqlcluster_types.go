@@ -50,9 +50,53 @@ type BackupSpec struct {
 	// +kubebuilder:validation:Maximum=32767
 	NodePort int32 `json:"nodePort,omitempty"`
 
-	Schedule                string `json:"schedule,omitempty"`
-	SuspendScheduledBackups bool   `json:"suspendScheduledBackups,omitempty"`
-	BackupImage             string `json:"backupImage,omitempty"`
+	// Schedule defines when the operator-managed backup CronJob runs.
+	// Example: "0 2 * * *".
+	Schedule string `json:"schedule,omitempty"`
+
+	// SuspendScheduledBackups pauses the CronJob without deleting it.
+	SuspendScheduledBackups bool `json:"suspendScheduledBackups,omitempty"`
+
+	// BackupImage optionally overrides the image used by the backup CronJob.
+	BackupImage string `json:"backupImage,omitempty"`
+
+	// ReplicationAllowedCIDR restricts physical replication access to the
+	// trusted Barman server network. Example: "192.168.180.54/32".
+	ReplicationAllowedCIDR string `json:"replicationAllowedCIDR,omitempty"`
+
+	// StreamingUser is the PostgreSQL role used by Barman for pg_basebackup
+	// and pg_receivewal. When empty, the operator defaults to "streaming_barman".
+	StreamingUser string `json:"streamingUser,omitempty"`
+}
+
+// RestoreSpec defines a requested Barman Point-in-Time Recovery operation.
+type RestoreSpec struct {
+	// Enabled indicates whether the operator should perform a restore operation.
+	// Keep this value false during normal PostgreSQL operation.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// BackupID identifies the Barman base backup used as the restore starting point.
+	// Example: "20260611T203128".
+	// When empty, the controller may use the latest available backup.
+	BackupID string `json:"backupId,omitempty"`
+
+	// TargetTime is the desired PITR recovery timestamp.
+	// PostgreSQL replays archived WAL records until this timestamp is reached.
+	// Example: "2026-06-11T16:31:35Z".
+	TargetTime *metav1.Time `json:"targetTime,omitempty"`
+
+	// TargetAction defines the action PostgreSQL performs after reaching
+	// the requested recovery target.
+	// +kubebuilder:validation:Enum=promote;pause;shutdown
+	TargetAction string `json:"targetAction,omitempty"`
+
+	// RestoreImage optionally overrides the image used by the restore Job.
+	// When empty, the operator uses the configured PostgreSQL image.
+	RestoreImage string `json:"restoreImage,omitempty"`
+
+	// PreserveExistingData indicates whether the current PGDATA directory
+	// should be preserved before restoring the selected Barman backup.
+	PreserveExistingData bool `json:"preserveExistingData,omitempty"`
 }
 
 // PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
@@ -79,6 +123,10 @@ type PostgreSQLClusterSpec struct {
 
 	// Backup defines the optional Barman backup configuration.
 	Backup BackupSpec `json:"backup,omitempty"`
+
+	// Restore defines an optional Barman PITR request.
+	// Restore must remain disabled during normal operation.
+	Restore RestoreSpec `json:"restore,omitempty"`
 }
 
 // PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
@@ -101,11 +149,36 @@ type PostgreSQLClusterStatus struct {
 	LastBackupStatus string       `json:"lastBackupStatus,omitempty"`
 	LastBackupTime   *metav1.Time `json:"lastBackupTime,omitempty"`
 	LastBackupID     string       `json:"lastBackupId,omitempty"`
+
 	// BackupCronJob is the generated CronJob responsible for scheduled backups.
 	BackupCronJob string `json:"backupCronJob,omitempty"`
 
 	// BackupSchedule is the active CronJob schedule.
 	BackupSchedule string `json:"backupSchedule,omitempty"`
+
+	// RestoreEnabled indicates whether a restore request is active.
+	RestoreEnabled bool `json:"restoreEnabled,omitempty"`
+
+	// RestorePhase describes the current PITR workflow state.
+	// Example values: Disabled, Pending, Preparing, Restoring, Completed, Failed.
+	RestorePhase string `json:"restorePhase,omitempty"`
+
+	// RestoreMessage provides a human-readable description of the latest
+	// restore workflow event or failure.
+	RestoreMessage string `json:"restoreMessage,omitempty"`
+
+	// RestoreJob is the name of the generated Kubernetes Job responsible
+	// for executing the PITR restore workflow.
+	RestoreJob string `json:"restoreJob,omitempty"`
+
+	// RestoreBackupID is the Barman base backup selected for the restore.
+	RestoreBackupID string `json:"restoreBackupId,omitempty"`
+
+	// RestoreTargetTime is the requested PostgreSQL PITR timestamp.
+	RestoreTargetTime *metav1.Time `json:"restoreTargetTime,omitempty"`
+
+	// LastRestoreTime records when the most recent successful restore completed.
+	LastRestoreTime *metav1.Time `json:"lastRestoreTime,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -114,6 +187,7 @@ type PostgreSQLClusterStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Postgres Pod",type=string,JSONPath=`.status.postgresPod`
 // +kubebuilder:printcolumn:name="Backup",type=boolean,JSONPath=`.status.backupEnabled`
+// +kubebuilder:printcolumn:name="Restore",type=string,JSONPath=`.status.restorePhase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // PostgreSQLCluster is the Schema for the postgresqlclusters API.

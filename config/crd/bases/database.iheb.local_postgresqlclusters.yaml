@@ -27,6 +27,9 @@ spec:
     - jsonPath: .status.backupEnabled
       name: Backup
       type: boolean
+    - jsonPath: .status.restorePhase
+      name: Restore
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -64,6 +67,8 @@ spec:
                     format: int32
                     type: integer
                   backupImage:
+                    description: BackupImage optionally overrides the image used by
+                      the backup CronJob.
                     type: string
                   barmanHost:
                     description: BarmanHost is the IP address or hostname of the external
@@ -94,13 +99,28 @@ spec:
                     maximum: 32767
                     minimum: 30000
                     type: integer
+                  replicationAllowedCIDR:
+                    description: |-
+                      ReplicationAllowedCIDR restricts physical replication access to the
+                      trusted Barman server network. Example: "192.168.180.54/32".
+                    type: string
                   schedule:
+                    description: |-
+                      Schedule defines when the operator-managed backup CronJob runs.
+                      Example: "0 2 * * *".
                     type: string
                   sshSecretName:
                     description: SSHSecretName is the Kubernetes Secret containing
                       the SSH private key for Barman access.
                     type: string
+                  streamingUser:
+                    description: |-
+                      StreamingUser is the PostgreSQL role used by Barman for pg_basebackup
+                      and pg_receivewal. When empty, the operator defaults to "streaming_barman".
+                    type: string
                   suspendScheduledBackups:
+                    description: SuspendScheduledBackups pauses the CronJob without
+                      deleting it.
                     type: boolean
                 type: object
               cpuLimit:
@@ -117,6 +137,49 @@ spec:
                 type: string
               postgresVersion:
                 type: string
+              restore:
+                description: |-
+                  Restore defines an optional Barman PITR request.
+                  Restore must remain disabled during normal operation.
+                properties:
+                  backupId:
+                    description: |-
+                      BackupID identifies the Barman base backup used as the restore starting point.
+                      Example: "20260611T203128".
+                      When empty, the controller may use the latest available backup.
+                    type: string
+                  enabled:
+                    description: |-
+                      Enabled indicates whether the operator should perform a restore operation.
+                      Keep this value false during normal PostgreSQL operation.
+                    type: boolean
+                  preserveExistingData:
+                    description: |-
+                      PreserveExistingData indicates whether the current PGDATA directory
+                      should be preserved before restoring the selected Barman backup.
+                    type: boolean
+                  restoreImage:
+                    description: |-
+                      RestoreImage optionally overrides the image used by the restore Job.
+                      When empty, the operator uses the configured PostgreSQL image.
+                    type: string
+                  targetAction:
+                    description: |-
+                      TargetAction defines the action PostgreSQL performs after reaching
+                      the requested recovery target.
+                    enum:
+                    - promote
+                    - pause
+                    - shutdown
+                    type: string
+                  targetTime:
+                    description: |-
+                      TargetTime is the desired PITR recovery timestamp.
+                      PostgreSQL replays archived WAL records until this timestamp is reached.
+                      Example: "2026-06-11T16:31:35Z".
+                    format: date-time
+                    type: string
+                type: object
               storageClassName:
                 type: string
               storageSize:
@@ -154,12 +217,44 @@ spec:
               lastBackupTime:
                 format: date-time
                 type: string
+              lastRestoreTime:
+                description: LastRestoreTime records when the most recent successful
+                  restore completed.
+                format: date-time
+                type: string
               phase:
                 type: string
               postgresPod:
                 type: string
               ready:
                 type: boolean
+              restoreBackupId:
+                description: RestoreBackupID is the Barman base backup selected for
+                  the restore.
+                type: string
+              restoreEnabled:
+                description: RestoreEnabled indicates whether a restore request is
+                  active.
+                type: boolean
+              restoreJob:
+                description: |-
+                  RestoreJob is the name of the generated Kubernetes Job responsible
+                  for executing the PITR restore workflow.
+                type: string
+              restoreMessage:
+                description: |-
+                  RestoreMessage provides a human-readable description of the latest
+                  restore workflow event or failure.
+                type: string
+              restorePhase:
+                description: |-
+                  RestorePhase describes the current PITR workflow state.
+                  Example values: Disabled, Pending, Preparing, Restoring, Completed, Failed.
+                type: string
+              restoreTargetTime:
+                description: RestoreTargetTime is the requested PostgreSQL PITR timestamp.
+                format: date-time
+                type: string
             type: object
         type: object
     served: true

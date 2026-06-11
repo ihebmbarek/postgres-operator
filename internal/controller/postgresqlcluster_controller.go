@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -36,7 +38,10 @@ const (
 	barmanSSHRuntimeDirectory   = "/etc/barman-ssh"
 )
 
-var barmanServerNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+var (
+	barmanServerNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	postgresRoleNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
 
 type barmanShowBackupResponse map[string]barmanBackupInfo
 
@@ -172,6 +177,16 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 			return ctrl.Result{
 				RequeueAfter: 30 * time.Second,
 			}, nil
+		}
+	}
+
+	if cluster.Spec.Backup.Enabled {
+		if err := r.reconcileStreamingCredentialsSecret(
+			ctx,
+			&cluster,
+			labels,
+		); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
@@ -418,6 +433,138 @@ func (r *PostgreSQLClusterReconciler) buildSecret(
 	}
 }
 
+func (r *PostgreSQLClusterReconciler) reconcileStreamingCredentialsSecret(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) error {
+	log := logf.FromContext(ctx)
+
+	secretName := cluster.Name + "-streaming-credentials"
+	streamingUser := effectiveStreamingUser(cluster)
+
+	var existingSecret corev1.Secret
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      secretName,
+			Namespace: cluster.Namespace,
+		},
+		&existingSecret,
+	)
+
+	if apierrors.IsNotFound(err) {
+		password, passwordErr := generateRandomPassword()
+		if passwordErr != nil {
+			return fmt.Errorf(
+				"failed to generate streaming replication password: %w",
+				passwordErr,
+			)
+		}
+
+		desiredSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: cluster.Namespace,
+				Labels:    labels,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				"STREAMING_USER":     streamingUser,
+				"STREAMING_PASSWORD": password,
+			},
+		}
+
+		if err := ctrl.SetControllerReference(
+			cluster,
+			desiredSecret,
+			r.Scheme,
+		); err != nil {
+			return err
+		}
+
+		log.Info(
+			"Creating streaming replication credentials Secret",
+			"name",
+			desiredSecret.Name,
+		)
+
+		return r.Create(
+			ctx,
+			desiredSecret,
+		)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if existingSecret.Data == nil {
+		existingSecret.Data = map[string][]byte{}
+	}
+
+	needsUpdate := false
+
+	if !reflect.DeepEqual(
+		existingSecret.Labels,
+		labels,
+	) {
+		existingSecret.Labels = labels
+		needsUpdate = true
+	}
+
+	if string(existingSecret.Data["STREAMING_USER"]) !=
+		streamingUser {
+		existingSecret.Data["STREAMING_USER"] =
+			[]byte(streamingUser)
+
+		needsUpdate = true
+	}
+
+	if len(existingSecret.Data["STREAMING_PASSWORD"]) == 0 {
+		password, passwordErr := generateRandomPassword()
+		if passwordErr != nil {
+			return fmt.Errorf(
+				"failed to generate streaming replication password: %w",
+				passwordErr,
+			)
+		}
+
+		existingSecret.Data["STREAMING_PASSWORD"] =
+			[]byte(password)
+
+		needsUpdate = true
+	}
+
+	if !needsUpdate {
+		return nil
+	}
+
+	log.Info(
+		"Updating streaming replication credentials Secret",
+		"name",
+		existingSecret.Name,
+	)
+
+	return r.Update(
+		ctx,
+		&existingSecret,
+	)
+}
+
+func generateRandomPassword() (string, error) {
+	randomBytes := make([]byte, 32)
+
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(
+		randomBytes,
+	), nil
+}
+
 func (r *PostgreSQLClusterReconciler) validateBarmanResources(
 	ctx context.Context,
 	cluster *databasev1.PostgreSQLCluster,
@@ -454,6 +601,30 @@ func (r *PostgreSQLClusterReconciler) validateBarmanResources(
 		return fmt.Errorf(
 			"SSH Secret %q does not contain id_ed25519",
 			cluster.Spec.Backup.SSHSecretName,
+		)
+	}
+
+	if cluster.Spec.Backup.ReplicationAllowedCIDR == "" {
+		return fmt.Errorf(
+			"spec.backup.replicationAllowedCIDR must not be empty when backup is enabled",
+		)
+	}
+
+	if _, _, err := net.ParseCIDR(
+		cluster.Spec.Backup.ReplicationAllowedCIDR,
+	); err != nil {
+		return fmt.Errorf(
+			"invalid spec.backup.replicationAllowedCIDR %q: %w",
+			cluster.Spec.Backup.ReplicationAllowedCIDR,
+			err,
+		)
+	}
+
+	streamingUser := effectiveStreamingUser(cluster)
+	if !postgresRoleNamePattern.MatchString(streamingUser) {
+		return fmt.Errorf(
+			"invalid spec.backup.streamingUser %q",
+			streamingUser,
 		)
 	}
 
@@ -570,6 +741,9 @@ func (r *PostgreSQLClusterReconciler) buildConfigMap(
 			"custom.conf": buildCustomPostgresConfig(
 				cluster,
 			),
+			"pg_hba.conf": buildManagedPostgresHBA(
+				cluster,
+			),
 		},
 	}
 }
@@ -584,6 +758,7 @@ func buildCustomPostgresConfig(
 
 	if !cluster.Spec.Backup.Enabled {
 		return `listen_addresses = '*'
+hba_file = '/etc/postgresql/pg_hba.conf'
 wal_level = replica
 archive_mode = off
 max_wal_senders = 5
@@ -603,6 +778,7 @@ archive_timeout = 60
 
 	return fmt.Sprintf(
 		`listen_addresses = '*'
+hba_file = '/etc/postgresql/pg_hba.conf'
 wal_level = replica
 archive_mode = on
 max_wal_senders = 5
@@ -613,6 +789,41 @@ archive_command = 'PATH=/etc/barman-ssh:$PATH barman-wal-archive -U %s %s %s %%p
 		barmanUser,
 		cluster.Spec.Backup.BarmanHost,
 		barmanServerName,
+	)
+}
+
+func effectiveStreamingUser(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	streamingUser := cluster.Spec.Backup.StreamingUser
+	if streamingUser == "" {
+		streamingUser = "streaming_barman"
+	}
+
+	return streamingUser
+}
+
+func buildManagedPostgresHBA(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	baseRules := `# Managed by postgres-operator. Do not edit manually.
+local   all             all                                     trust
+host    all             all             127.0.0.1/32            scram-sha-256
+host    all             all             ::1/128                 scram-sha-256
+host    all             all             0.0.0.0/0               scram-sha-256
+host    all             all             ::/0                    scram-sha-256
+`
+
+	if !cluster.Spec.Backup.Enabled ||
+		cluster.Spec.Backup.ReplicationAllowedCIDR == "" {
+		return baseRules
+	}
+
+	return fmt.Sprintf(
+		"%s\nhost    replication     %s    %s    scram-sha-256\n",
+		baseRules,
+		effectiveStreamingUser(cluster),
+		cluster.Spec.Backup.ReplicationAllowedCIDR,
 	)
 }
 
@@ -756,6 +967,12 @@ func (r *PostgreSQLClusterReconciler) buildStatefulSet(
 			SubPath:   "custom.conf",
 			ReadOnly:  true,
 		},
+		{
+			Name:      "postgres-config",
+			MountPath: "/etc/postgresql/pg_hba.conf",
+			SubPath:   "pg_hba.conf",
+			ReadOnly:  true,
+		},
 	}
 
 	volumes := []corev1.Volume{
@@ -871,9 +1088,9 @@ chmod 755 /etc/barman-ssh/ssh
 		"%x",
 		sha256.Sum256(
 			[]byte(
-				buildCustomPostgresConfig(
-					cluster,
-				),
+				buildCustomPostgresConfig(cluster)+
+					"\n---pg_hba.conf---\n"+
+					buildManagedPostgresHBA(cluster),
 			),
 		),
 	)
@@ -901,8 +1118,9 @@ chmod 755 /etc/barman-ssh/ssh
 					InitContainers: initContainers,
 					Containers: []corev1.Container{
 						{
-							Name:  "postgres",
-							Image: image,
+							Name:      "postgres",
+							Image:     image,
+							Lifecycle: buildStreamingRoleLifecycle(cluster),
 							Args: []string{
 								"-c",
 								"config_file=/etc/postgresql/custom.conf",
@@ -1000,6 +1218,30 @@ chmod 755 /etc/barman-ssh/ssh
 									},
 								},
 								{
+									Name: "STREAMING_USER",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: cluster.Name + "-streaming-credentials",
+											},
+											Key:      "STREAMING_USER",
+											Optional: boolPtr(true),
+										},
+									},
+								},
+								{
+									Name: "STREAMING_PASSWORD",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: cluster.Name + "-streaming-credentials",
+											},
+											Key:      "STREAMING_PASSWORD",
+											Optional: boolPtr(true),
+										},
+									},
+								},
+								{
 									Name:  "PGDATA",
 									Value: "/var/lib/postgresql/data/pgdata",
 								},
@@ -1028,6 +1270,75 @@ chmod 755 /etc/barman-ssh/ssh
 							},
 						},
 					},
+				},
+			},
+		},
+	}
+}
+
+func buildStreamingRoleLifecycle(
+	cluster *databasev1.PostgreSQLCluster,
+) *corev1.Lifecycle {
+	if !cluster.Spec.Backup.Enabled {
+		return nil
+	}
+
+	return &corev1.Lifecycle{
+		PostStart: &corev1.LifecycleHandler{
+			Exec: &corev1.ExecAction{
+				Command: []string{
+					"/bin/sh",
+					"-ec",
+					`
+attempt=1
+
+while [ "${attempt}" -le 60 ]; do
+  if pg_isready \
+    -h 127.0.0.1 \
+    -p 5432 \
+    -U "${POSTGRES_USER}" \
+    -d postgres \
+    >/dev/null 2>&1
+  then
+    if psql \
+      -v ON_ERROR_STOP=1 \
+      -U "${POSTGRES_USER}" \
+      -d postgres \
+      --set=streaming_user="${STREAMING_USER}" \
+      --set=streaming_password="${STREAMING_PASSWORD}" \
+      <<'SQL'
+SELECT format(
+  'CREATE ROLE %I WITH LOGIN REPLICATION PASSWORD %L',
+  :'streaming_user',
+  :'streaming_password'
+)
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_roles
+  WHERE rolname = :'streaming_user'
+)
+\gexec
+
+SELECT format(
+  'ALTER ROLE %I WITH LOGIN REPLICATION PASSWORD %L',
+  :'streaming_user',
+  :'streaming_password'
+)
+\gexec
+SQL
+    then
+      echo "Streaming replication role configured successfully"
+      exit 0
+    fi
+  fi
+
+  attempt=$((attempt + 1))
+  sleep 2
+done
+
+echo "Failed to configure the streaming replication role" >&2
+exit 1
+`,
 				},
 			},
 		},
@@ -1162,8 +1473,9 @@ func (r *PostgreSQLClusterReconciler) reconcileBarmanNodePortService(
 			Labels:    labels,
 		},
 		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeNodePort,
-			Selector: labels,
+			Type:                  corev1.ServiceTypeNodePort,
+			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
+			Selector:              labels,
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "postgres",
@@ -1216,6 +1528,13 @@ func (r *PostgreSQLClusterReconciler) reconcileBarmanNodePortService(
 	if existingService.Spec.Type !=
 		desiredService.Spec.Type {
 		existingService.Spec.Type = desiredService.Spec.Type
+		needsUpdate = true
+	}
+
+	if existingService.Spec.ExternalTrafficPolicy !=
+		desiredService.Spec.ExternalTrafficPolicy {
+		existingService.Spec.ExternalTrafficPolicy =
+			desiredService.Spec.ExternalTrafficPolicy
 		needsUpdate = true
 	}
 
@@ -1426,19 +1745,34 @@ func (r *PostgreSQLClusterReconciler) buildBackupCronJob(
 
 echo "Starting scheduled Barman backup for %s"
 
-ssh \
-  -i /etc/barman-ssh/id_ed25519 \
-  -l %s \
-  -o UserKnownHostsFile=/etc/barman-ssh/known_hosts \
-  -o StrictHostKeyChecking=yes \
-  -o IdentitiesOnly=yes \
-  -o PreferredAuthentications=publickey \
-  -o PasswordAuthentication=no \
-  -o BatchMode=yes \
-  %s \
-  "barman backup %s --wait"
+for attempt in 1 2 3; do
+  echo "Backup attempt ${attempt}/3"
 
-echo "Scheduled Barman backup completed successfully"
+  if ssh \
+    -i /etc/barman-ssh/id_ed25519 \
+    -l %s \
+    -o UserKnownHostsFile=/etc/barman-ssh/known_hosts \
+    -o StrictHostKeyChecking=yes \
+    -o IdentitiesOnly=yes \
+    -o PreferredAuthentications=publickey \
+    -o PasswordAuthentication=no \
+    -o BatchMode=yes \
+    %s \
+    "barman backup %s --wait"
+  then
+    echo "Scheduled Barman backup completed successfully"
+    exit 0
+  fi
+
+  if [ "${attempt}" -lt 3 ]; then
+    delay=$((attempt * 20))
+    echo "Backup attempt failed; retrying in ${delay}s"
+    sleep "${delay}"
+  fi
+done
+
+echo "Scheduled Barman backup failed after 3 attempts" >&2
+exit 1
 `,
 		shellQuote(barmanServerName),
 		shellQuote(barmanUser),
@@ -1465,7 +1799,7 @@ echo "Scheduled Barman backup completed successfully"
 			JobTemplate: batchv1.JobTemplateSpec{
 				Spec: batchv1.JobSpec{
 					BackoffLimit: int32Ptr(
-						1,
+						0,
 					),
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{

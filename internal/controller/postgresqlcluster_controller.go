@@ -9,9 +9,11 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	resource "k8s.io/apimachinery/pkg/api/resource"
@@ -61,6 +63,8 @@ type PostgreSQLClusterReconciler struct {
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
 
 func (r *PostgreSQLClusterReconciler) Reconcile(
 	ctx context.Context,
@@ -195,6 +199,15 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 
+	if err := r.reconcileBackupCronJob(
+		ctx,
+		&cluster,
+		labels,
+		image,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	statefulSet := r.buildStatefulSet(
 		&cluster,
 		labels,
@@ -256,13 +269,25 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		cluster.Status.BackupEnabled = true
 
 		if cluster.Spec.Backup.ExposeService {
-			cluster.Status.BackupPhase = "Exposed"
 			cluster.Status.BarmanService = cluster.Name + "-barman"
 			cluster.Status.BarmanNodePort = cluster.Spec.Backup.NodePort
 		} else {
-			cluster.Status.BackupPhase = "Configured"
 			cluster.Status.BarmanService = ""
 			cluster.Status.BarmanNodePort = 0
+		}
+
+		if cluster.Spec.Backup.Schedule != "" {
+			cluster.Status.BackupPhase = "Scheduled"
+			cluster.Status.BackupCronJob = cluster.Name + "-barman-backup"
+			cluster.Status.BackupSchedule = cluster.Spec.Backup.Schedule
+		} else if cluster.Spec.Backup.ExposeService {
+			cluster.Status.BackupPhase = "Exposed"
+			cluster.Status.BackupCronJob = ""
+			cluster.Status.BackupSchedule = ""
+		} else {
+			cluster.Status.BackupPhase = "Configured"
+			cluster.Status.BackupCronJob = ""
+			cluster.Status.BackupSchedule = ""
 		}
 
 		if err := r.updateLatestBackupStatus(
@@ -286,6 +311,8 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		cluster.Status.LastBackupStatus = "Disabled"
 		cluster.Status.LastBackupTime = nil
 		cluster.Status.LastBackupID = ""
+		cluster.Status.BackupCronJob = ""
+		cluster.Status.BackupSchedule = ""
 	}
 
 	if !reflect.DeepEqual(
@@ -1226,6 +1253,313 @@ func (r *PostgreSQLClusterReconciler) reconcileBarmanNodePortService(
 	)
 }
 
+func (r *PostgreSQLClusterReconciler) reconcileBackupCronJob(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	defaultImage string,
+) error {
+	log := logf.FromContext(ctx)
+	cronJobName := cluster.Name + "-barman-backup"
+
+	var existingCronJob batchv1.CronJob
+	getErr := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      cronJobName,
+			Namespace: cluster.Namespace,
+		},
+		&existingCronJob,
+	)
+
+	shouldSchedule := cluster.Spec.Backup.Enabled &&
+		cluster.Spec.Backup.Schedule != ""
+
+	if !shouldSchedule {
+		if apierrors.IsNotFound(getErr) {
+			return nil
+		}
+
+		if getErr != nil {
+			return getErr
+		}
+
+		log.Info(
+			"Deleting scheduled Barman backup CronJob",
+			"name",
+			cronJobName,
+		)
+
+		return r.Delete(
+			ctx,
+			&existingCronJob,
+		)
+	}
+
+	desiredCronJob, err := r.buildBackupCronJob(
+		cluster,
+		labels,
+		defaultImage,
+	)
+	if err != nil {
+		return err
+	}
+
+	if apierrors.IsNotFound(getErr) {
+		if err := ctrl.SetControllerReference(
+			cluster,
+			desiredCronJob,
+			r.Scheme,
+		); err != nil {
+			return err
+		}
+
+		log.Info(
+			"Creating scheduled Barman backup CronJob",
+			"name",
+			desiredCronJob.Name,
+			"schedule",
+			desiredCronJob.Spec.Schedule,
+		)
+
+		return r.Create(
+			ctx,
+			desiredCronJob,
+		)
+	}
+
+	if getErr != nil {
+		return getErr
+	}
+
+	needsUpdate := false
+
+	if !reflect.DeepEqual(
+		existingCronJob.Labels,
+		desiredCronJob.Labels,
+	) {
+		existingCronJob.Labels = desiredCronJob.Labels
+		needsUpdate = true
+	}
+
+	if !reflect.DeepEqual(
+		existingCronJob.Spec,
+		desiredCronJob.Spec,
+	) {
+		existingCronJob.Spec = desiredCronJob.Spec
+		needsUpdate = true
+	}
+
+	if !needsUpdate {
+		return nil
+	}
+
+	log.Info(
+		"Updating scheduled Barman backup CronJob",
+		"name",
+		existingCronJob.Name,
+		"schedule",
+		desiredCronJob.Spec.Schedule,
+	)
+
+	return r.Update(
+		ctx,
+		&existingCronJob,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) buildBackupCronJob(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	defaultImage string,
+) (*batchv1.CronJob, error) {
+	if cluster.Spec.Backup.Schedule == "" {
+		return nil, fmt.Errorf(
+			"spec.backup.schedule must not be empty when scheduled backups are enabled",
+		)
+	}
+
+	if cluster.Spec.Backup.BarmanHost == "" {
+		return nil, fmt.Errorf(
+			"spec.backup.barmanHost must not be empty",
+		)
+	}
+
+	if cluster.Spec.Backup.SSHSecretName == "" {
+		return nil, fmt.Errorf(
+			"spec.backup.sshSecretName must not be empty",
+		)
+	}
+
+	barmanUser := cluster.Spec.Backup.BarmanUser
+	if barmanUser == "" {
+		barmanUser = "barman"
+	}
+
+	barmanServerName := cluster.Spec.Backup.BarmanServerName
+	if barmanServerName == "" {
+		barmanServerName = cluster.Name
+	}
+
+	if !barmanServerNamePattern.MatchString(
+		barmanServerName,
+	) {
+		return nil, fmt.Errorf(
+			"invalid Barman server name %q",
+			barmanServerName,
+		)
+	}
+
+	backupImage := cluster.Spec.Backup.BackupImage
+	if backupImage == "" {
+		backupImage = defaultImage
+	}
+
+	cronJobLabels := map[string]string{}
+	for key, value := range labels {
+		cronJobLabels[key] = value
+	}
+	cronJobLabels["app.kubernetes.io/component"] = "backup"
+
+	command := fmt.Sprintf(
+		`set -euo pipefail
+
+echo "Starting scheduled Barman backup for %s"
+
+ssh \
+  -i /etc/barman-ssh/id_ed25519 \
+  -l %s \
+  -o UserKnownHostsFile=/etc/barman-ssh/known_hosts \
+  -o StrictHostKeyChecking=yes \
+  -o IdentitiesOnly=yes \
+  -o PreferredAuthentications=publickey \
+  -o PasswordAuthentication=no \
+  -o BatchMode=yes \
+  %s \
+  "barman backup %s --wait"
+
+echo "Scheduled Barman backup completed successfully"
+`,
+		shellQuote(barmanServerName),
+		shellQuote(barmanUser),
+		shellQuote(cluster.Spec.Backup.BarmanHost),
+		shellQuote(barmanServerName),
+	)
+
+	return &batchv1.CronJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cluster.Name + "-barman-backup",
+			Namespace: cluster.Namespace,
+			Labels:    cronJobLabels,
+		},
+		Spec: batchv1.CronJobSpec{
+			Schedule:          cluster.Spec.Backup.Schedule,
+			ConcurrencyPolicy: batchv1.ForbidConcurrent,
+			Suspend:           boolPtr(cluster.Spec.Backup.SuspendScheduledBackups),
+			SuccessfulJobsHistoryLimit: int32Ptr(
+				3,
+			),
+			FailedJobsHistoryLimit: int32Ptr(
+				3,
+			),
+			JobTemplate: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					BackoffLimit: int32Ptr(
+						1,
+					),
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{
+							Labels: cronJobLabels,
+						},
+						Spec: corev1.PodSpec{
+							RestartPolicy: corev1.RestartPolicyNever,
+							Containers: []corev1.Container{
+								{
+									Name:            "barman-backup",
+									Image:           backupImage,
+									ImagePullPolicy: corev1.PullAlways,
+									Command: []string{
+										"/bin/bash",
+										"-lc",
+									},
+									Args: []string{
+										command,
+									},
+									Resources: corev1.ResourceRequirements{
+										Requests: corev1.ResourceList{
+											corev1.ResourceCPU: resource.MustParse(
+												"50m",
+											),
+											corev1.ResourceMemory: resource.MustParse(
+												"64Mi",
+											),
+										},
+										Limits: corev1.ResourceList{
+											corev1.ResourceCPU: resource.MustParse(
+												"250m",
+											),
+											corev1.ResourceMemory: resource.MustParse(
+												"256Mi",
+											),
+										},
+									},
+									VolumeMounts: []corev1.VolumeMount{
+										{
+											Name:      "barman-ssh",
+											MountPath: barmanSSHRuntimeDirectory,
+											ReadOnly:  true,
+										},
+									},
+								},
+							},
+							Volumes: []corev1.Volume{
+								{
+									Name: "barman-ssh",
+									VolumeSource: corev1.VolumeSource{
+										Projected: &corev1.ProjectedVolumeSource{
+											DefaultMode: int32Ptr(
+												0400,
+											),
+											Sources: []corev1.VolumeProjection{
+												{
+													Secret: &corev1.SecretProjection{
+														LocalObjectReference: corev1.LocalObjectReference{
+															Name: cluster.Spec.Backup.SSHSecretName,
+														},
+														Items: []corev1.KeyToPath{
+															{
+																Key:  "id_ed25519",
+																Path: "id_ed25519",
+															},
+														},
+													},
+												},
+												{
+													ConfigMap: &corev1.ConfigMapProjection{
+														LocalObjectReference: corev1.LocalObjectReference{
+															Name: barmanKnownHostsConfigMap,
+														},
+														Items: []corev1.KeyToPath{
+															{
+																Key:  "known_hosts",
+																Path: "known_hosts",
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
 func (r *PostgreSQLClusterReconciler) updateLatestBackupStatus(
 	ctx context.Context,
 	cluster *databasev1.PostgreSQLCluster,
@@ -1542,6 +1876,22 @@ func (r *PostgreSQLClusterReconciler) buildBarmanHostKeyCallback(
 	return hostKeyCallback, nil
 }
 
+func shellQuote(
+	value string,
+) string {
+	return "'" + strings.ReplaceAll(
+		value,
+		"'",
+		"'\\\"'\\\"'",
+	) + "'"
+}
+
+func boolPtr(
+	value bool,
+) *bool {
+	return &value
+}
+
 func int32Ptr(
 	i int32,
 ) *int32 {
@@ -1568,6 +1918,9 @@ func (r *PostgreSQLClusterReconciler) SetupWithManager(
 		).
 		Owns(
 			&corev1.ConfigMap{},
+		).
+		Owns(
+			&batchv1.CronJob{},
 		).
 		Named(
 			"postgresqlcluster",

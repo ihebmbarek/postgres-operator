@@ -63,6 +63,8 @@ spec:
                       force WAL segment switching, in seconds.
                     format: int32
                     type: integer
+                  backupImage:
+                    type: string
                   barmanHost:
                     description: BarmanHost is the IP address or hostname of the external
                       Barman backup server.
@@ -92,10 +94,14 @@ spec:
                     maximum: 32767
                     minimum: 30000
                     type: integer
+                  schedule:
+                    type: string
                   sshSecretName:
                     description: SSHSecretName is the Kubernetes Secret containing
                       the SSH private key for Barman access.
                     type: string
+                  suspendScheduledBackups:
+                    type: boolean
                 type: object
               cpuLimit:
                 type: string
@@ -121,6 +127,10 @@ spec:
           status:
             description: PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
             properties:
+              backupCronJob:
+                description: BackupCronJob is the generated CronJob responsible for
+                  scheduled backups.
+                type: string
               backupEnabled:
                 description: BackupEnabled indicates whether backup configuration
                   is enabled.
@@ -128,6 +138,9 @@ spec:
               backupPhase:
                 description: BackupPhase describes the current backup configuration
                   state.
+                type: string
+              backupSchedule:
+                description: BackupSchedule is the active CronJob schedule.
                 type: string
               barmanNodePort:
                 format: int32

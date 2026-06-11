@@ -49,6 +49,10 @@ type BackupSpec struct {
 	// +kubebuilder:validation:Minimum=30000
 	// +kubebuilder:validation:Maximum=32767
 	NodePort int32 `json:"nodePort,omitempty"`
+
+	Schedule                string `json:"schedule,omitempty"`
+	SuspendScheduledBackups bool   `json:"suspendScheduledBackups,omitempty"`
+	BackupImage             string `json:"backupImage,omitempty"`
 }
 
 // PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
@@ -97,6 +101,11 @@ type PostgreSQLClusterStatus struct {
 	LastBackupStatus string       `json:"lastBackupStatus,omitempty"`
 	LastBackupTime   *metav1.Time `json:"lastBackupTime,omitempty"`
 	LastBackupID     string       `json:"lastBackupId,omitempty"`
+	// BackupCronJob is the generated CronJob responsible for scheduled backups.
+	BackupCronJob string `json:"backupCronJob,omitempty"`
+
+	// BackupSchedule is the active CronJob schedule.
+	BackupSchedule string `json:"backupSchedule,omitempty"`
 }
 
 // +kubebuilder:object:root=true

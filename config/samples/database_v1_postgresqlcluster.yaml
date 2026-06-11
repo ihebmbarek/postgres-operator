@@ -27,3 +27,6 @@ spec:
     archiveTimeout: 60
     exposeService: true
     nodePort: 30433
+    schedule: "0 2 * * *"
+    suspendScheduledBackups: false
+    backupImage: quay.io/iheb_mbarek/postgres-barman:latest

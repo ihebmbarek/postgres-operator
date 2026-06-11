@@ -148,6 +148,13 @@ spec:
                       Example: "20260611T203128".
                       When empty, the controller may use the latest available backup.
                     type: string
+                  confirmation:
+                    description: |-
+                      Confirmation is an explicit safety acknowledgement required before the
+                      operator replaces the current PostgreSQL data directory.
+                      The expected format is: "RESTORE <cluster-name>".
+                      Example: "RESTORE sample-postgres".
+                    type: string
                   enabled:
                     description: |-
                       Enabled indicates whether the operator should perform a restore operation.
@@ -158,6 +165,15 @@ spec:
                       PreserveExistingData indicates whether the current PGDATA directory
                       should be preserved before restoring the selected Barman backup.
                     type: boolean
+                  requestId:
+                    description: |-
+                      RequestID uniquely identifies a restore operation.
+                      Use a new value for each restore request so the operator does not
+                      execute the same destructive restore repeatedly.
+                      Example: "demo-restore-001".
+                    maxLength: 32
+                    pattern: ^[a-z0-9][a-z0-9-]*$
+                    type: string
                   restoreImage:
                     description: |-
                       RestoreImage optionally overrides the image used by the restore Job.
@@ -221,6 +237,11 @@ spec:
                 description: LastRestoreTime records when the most recent successful
                   restore completed.
                 format: date-time
+                type: string
+              observedRestoreRequestId:
+                description: |-
+                  ObservedRestoreRequestID records the restore request currently processed
+                  or most recently completed by the operator.
                 type: string
               phase:
                 type: string

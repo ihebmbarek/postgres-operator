@@ -75,6 +75,20 @@ type RestoreSpec struct {
 	// Keep this value false during normal PostgreSQL operation.
 	Enabled bool `json:"enabled,omitempty"`
 
+	// RequestID uniquely identifies a restore operation.
+	// Use a new value for each restore request so the operator does not
+	// execute the same destructive restore repeatedly.
+	// Example: "demo-restore-001".
+	// +kubebuilder:validation:MaxLength=32
+	// +kubebuilder:validation:Pattern=`^[a-z0-9][a-z0-9-]*$`
+	RequestID string `json:"requestId,omitempty"`
+
+	// Confirmation is an explicit safety acknowledgement required before the
+	// operator replaces the current PostgreSQL data directory.
+	// The expected format is: "RESTORE <cluster-name>".
+	// Example: "RESTORE sample-postgres".
+	Confirmation string `json:"confirmation,omitempty"`
+
 	// BackupID identifies the Barman base backup used as the restore starting point.
 	// Example: "20260611T203128".
 	// When empty, the controller may use the latest available backup.
@@ -158,6 +172,10 @@ type PostgreSQLClusterStatus struct {
 
 	// RestoreEnabled indicates whether a restore request is active.
 	RestoreEnabled bool `json:"restoreEnabled,omitempty"`
+
+	// ObservedRestoreRequestID records the restore request currently processed
+	// or most recently completed by the operator.
+	ObservedRestoreRequestID string `json:"observedRestoreRequestId,omitempty"`
 
 	// RestorePhase describes the current PITR workflow state.
 	// Example values: Disabled, Pending, Preparing, Restoring, Completed, Failed.

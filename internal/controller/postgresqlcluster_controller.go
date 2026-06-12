@@ -2375,6 +2375,38 @@ exit 1`,
 
 echo "Starting post-PITR Barman stabilization"
 
+attempt=1
+RECOVERY_STATE=""
+
+while [ "${attempt}" -le 60 ]; do
+  RECOVERY_STATE="$(
+    PGPASSWORD="${POSTGRES_PASSWORD}" \
+    PGCONNECT_TIMEOUT=5 \
+    psql \
+      -h %s \
+      -p 5432 \
+      -U "${POSTGRES_USER}" \
+      -d postgres \
+      -Atqc "SELECT pg_is_in_recovery();" \
+      2>/dev/null ||
+    true
+  )"
+
+  if [ "${RECOVERY_STATE}" = "f" ]; then
+    echo "PostgreSQL promotion confirmed"
+    break
+  fi
+
+  echo "Waiting for PostgreSQL promotion; attempt ${attempt}"
+  attempt=$((attempt + 1))
+  sleep 2
+done
+
+if [ "${RECOVERY_STATE}" != "f" ]; then
+  echo "PostgreSQL did not promote before the timeout" >&2
+  exit 1
+fi
+
 ssh \
   -i /etc/barman-ssh/id_ed25519 \
   -l %s \
@@ -2390,6 +2422,7 @@ ssh \
 echo
 echo "POST_RESTORE_STABILIZATION_JOB_OK"
 `,
+		shellQuote(cluster.Name),
 		shellQuote(barmanUser),
 		shellQuote(cluster.Spec.Backup.BarmanHost),
 		shellQuote(remoteInvocation),
@@ -2440,6 +2473,30 @@ echo "POST_RESTORE_STABILIZATION_JOB_OK"
 							},
 							Args: []string{
 								command,
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "POSTGRES_USER",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: cluster.Name + "-credentials",
+											},
+											Key: "POSTGRES_USER",
+										},
+									},
+								},
+								{
+									Name: "POSTGRES_PASSWORD",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: cluster.Name + "-credentials",
+											},
+											Key: "POSTGRES_PASSWORD",
+										},
+									},
+								},
 							},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{

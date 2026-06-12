@@ -2297,9 +2297,35 @@ func (r *PostgreSQLClusterReconciler) buildRestoreStabilizationJob(
 
 echo "Resetting Barman receive-wal state after PostgreSQL PITR promotion"
 
+SERVER=%s
+
+echo "Stopping the previous Barman receive-wal process"
+
+barman receive-wal \
+  --stop \
+  "${SERVER}" \
+  || true
+
+attempt=1
+
+while pgrep -af 'pg_receivewal|pg_receivexlog' |
+    grep -q "[/]${SERVER}/streaming"
+do
+  if [ "${attempt}" -gt 12 ]; then
+    echo "Previous receive-wal process did not stop before timeout" >&2
+    exit 1
+  fi
+
+  echo "Waiting for the previous receive-wal process to stop"
+  attempt=$((attempt + 1))
+  sleep 2
+done
+
+echo "Resetting Barman receive-wal state"
+
 barman receive-wal \
   --reset \
-  %s
+  "${SERVER}"
 
 barman cron
 

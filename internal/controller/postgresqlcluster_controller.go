@@ -1345,6 +1345,50 @@ SELECT format(
 SQL
     then
       echo "Streaming replication role configured successfully"
+
+      RECOVERY_STATE="$(
+        psql \
+          -U "${POSTGRES_USER}" \
+          -d postgres \
+          -Atqc "SELECT pg_is_in_recovery();"
+      )"
+
+      if [ "${RECOVERY_STATE}" = "f" ]; then
+        psql \
+          -v ON_ERROR_STOP=1 \
+          -U "${POSTGRES_USER}" \
+          -d postgres \
+          -c "ALTER SYSTEM RESET restore_command;" \
+          || true
+
+        psql \
+          -v ON_ERROR_STOP=1 \
+          -U "${POSTGRES_USER}" \
+          -d postgres \
+          -c "ALTER SYSTEM RESET recovery_target_time;" \
+          || true
+
+        psql \
+          -v ON_ERROR_STOP=1 \
+          -U "${POSTGRES_USER}" \
+          -d postgres \
+          -c "ALTER SYSTEM RESET recovery_target_action;" \
+          || true
+
+        psql \
+          -v ON_ERROR_STOP=1 \
+          -U "${POSTGRES_USER}" \
+          -d postgres \
+          -c "SELECT pg_reload_conf();" \
+          || true
+
+        rm -rf \
+          /var/lib/postgresql/data/barman-wal-* \
+          || true
+
+        echo "Post-PITR PostgreSQL cleanup completed successfully"
+      fi
+
       exit 0
     fi
   fi
@@ -1498,28 +1542,12 @@ func (r *PostgreSQLClusterReconciler) reconcileRestoreWorkflow(
 				return ctrl.Result{}, podErr
 			}
 
-			now := metav1.Now()
-			cluster.Status.LastRestoreTime = &now
-
-			if err := r.updateRestoreStatus(
+			return r.reconcileRestoreStabilizationJob(
 				ctx,
 				cluster,
-				"Completed",
-				"restore completed successfully; disable spec.restore.enabled to resume normal operation",
-				jobName,
-			); err != nil {
-				return ctrl.Result{}, err
-			}
-
-			log.Info(
-				"PostgreSQL PITR restore completed successfully",
-				"requestId",
-				cluster.Spec.Restore.RequestID,
-				"job",
-				jobName,
+				labels,
+				defaultImage,
 			)
-
-			return ctrl.Result{}, nil
 		}
 
 		if err := r.ensureStatefulSetReplicas(
@@ -1889,6 +1917,7 @@ id
 PGROOT="/var/lib/postgresql/data"
 PGDATA="${PGROOT}/pgdata"
 REQUEST_ID=%s
+STAGED_WAL="${PGROOT}/barman-wal-${REQUEST_ID}"
 PRESERVE_EXISTING_DATA=%s
 
 if [ -d "${PGDATA}" ]; then
@@ -1903,6 +1932,7 @@ if [ -d "${PGDATA}" ]; then
 fi
 
 mkdir -p "${PGDATA}"
+rm -rf "${STAGED_WAL}"
 
 ssh \
   -i /etc/barman-ssh/id_ed25519 \
@@ -1926,8 +1956,14 @@ ssh \
 
 test -f "${PGDATA}/PG_VERSION"
 
+if [ -d "${PGDATA}/barman_wal" ]; then
+  mv "${PGDATA}/barman_wal" "${STAGED_WAL}"
+fi
+
+test -d "${STAGED_WAL}"
+
 sed -i \
-  "s#^restore_command = .*#restore_command = 'cp ${PGDATA}/barman_wal/%%f %%p'#" \
+  "s#^restore_command = .*#restore_command = 'cp ${STAGED_WAL}/%%f %%p'#" \
   "${PGDATA}/postgresql.auto.conf"
 
 touch "${PGDATA}/recovery.signal"
@@ -2037,6 +2073,376 @@ echo "RESTORE_JOB_OK"
 								},
 							},
 						},
+						{
+							Name: "barman-ssh",
+							VolumeSource: corev1.VolumeSource{
+								Projected: &corev1.ProjectedVolumeSource{
+									DefaultMode: int32Ptr(
+										0400,
+									),
+									Sources: []corev1.VolumeProjection{
+										{
+											Secret: &corev1.SecretProjection{
+												LocalObjectReference: corev1.LocalObjectReference{
+													Name: cluster.Spec.Backup.SSHSecretName,
+												},
+												Items: []corev1.KeyToPath{
+													{
+														Key:  "id_ed25519",
+														Path: "id_ed25519",
+													},
+												},
+											},
+										},
+										{
+											ConfigMap: &corev1.ConfigMapProjection{
+												LocalObjectReference: corev1.LocalObjectReference{
+													Name: barmanKnownHostsConfigMap,
+												},
+												Items: []corev1.KeyToPath{
+													{
+														Key:  "known_hosts",
+														Path: "known_hosts",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+func restoreStabilizationJobName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	name := cluster.Name +
+		"-restore-stabilize-" +
+		cluster.Spec.Restore.RequestID
+
+	if len(name) <= 63 {
+		return name
+	}
+
+	return strings.TrimRight(
+		name[:63],
+		"-",
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) reconcileRestoreStabilizationJob(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	defaultImage string,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	jobName := restoreStabilizationJobName(
+		cluster,
+	)
+
+	var stabilizationJob batchv1.Job
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      jobName,
+			Namespace: cluster.Namespace,
+		},
+		&stabilizationJob,
+	)
+
+	if apierrors.IsNotFound(err) {
+		desiredJob, buildErr := r.buildRestoreStabilizationJob(
+			cluster,
+			labels,
+			defaultImage,
+		)
+		if buildErr != nil {
+			return ctrl.Result{}, buildErr
+		}
+
+		if referenceErr := ctrl.SetControllerReference(
+			cluster,
+			desiredJob,
+			r.Scheme,
+		); referenceErr != nil {
+			return ctrl.Result{}, referenceErr
+		}
+
+		log.Info(
+			"Creating post-PITR Barman stabilization Job",
+			"name",
+			desiredJob.Name,
+			"requestId",
+			cluster.Spec.Restore.RequestID,
+		)
+
+		if createErr := r.Create(
+			ctx,
+			desiredJob,
+		); createErr != nil {
+			return ctrl.Result{}, createErr
+		}
+
+		if statusErr := r.updateRestoreStatus(
+			ctx,
+			cluster,
+			"Stabilizing",
+			"PostgreSQL promoted successfully; waiting for Barman streaming reset",
+			jobName,
+		); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if stabilizationJob.Status.Failed > 0 {
+		message := fmt.Sprintf(
+			"post-PITR stabilization Job %q failed; inspect its logs",
+			jobName,
+		)
+
+		if statusErr := r.updateRestoreStatus(
+			ctx,
+			cluster,
+			"Failed",
+			message,
+			jobName,
+		); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+
+		return ctrl.Result{}, nil
+	}
+
+	if stabilizationJob.Status.Succeeded == 0 {
+		if statusErr := r.updateRestoreStatus(
+			ctx,
+			cluster,
+			"Stabilizing",
+			"waiting for Barman receive-wal to restart on the promoted timeline",
+			jobName,
+		); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+
+		return ctrl.Result{
+			RequeueAfter: 5 * time.Second,
+		}, nil
+	}
+
+	now := metav1.Now()
+	cluster.Status.LastRestoreTime = &now
+
+	if statusErr := r.updateRestoreStatus(
+		ctx,
+		cluster,
+		"Completed",
+		"restore and post-PITR streaming stabilization completed successfully; disable spec.restore.enabled to resume normal operation",
+		jobName,
+	); statusErr != nil {
+		return ctrl.Result{}, statusErr
+	}
+
+	log.Info(
+		"PostgreSQL PITR restore and Barman stabilization completed successfully",
+		"requestId",
+		cluster.Spec.Restore.RequestID,
+		"job",
+		jobName,
+	)
+
+	return ctrl.Result{}, nil
+}
+
+func (r *PostgreSQLClusterReconciler) buildRestoreStabilizationJob(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	defaultImage string,
+) (*batchv1.Job, error) {
+	image := cluster.Spec.Restore.RestoreImage
+	if image == "" {
+		image = cluster.Spec.Backup.BackupImage
+	}
+
+	if image == "" {
+		image = defaultImage
+	}
+
+	barmanUser := cluster.Spec.Backup.BarmanUser
+	if barmanUser == "" {
+		barmanUser = "barman"
+	}
+
+	barmanServerName := cluster.Spec.Backup.BarmanServerName
+	if barmanServerName == "" {
+		barmanServerName = cluster.Name
+	}
+
+	remoteCommand := fmt.Sprintf(
+		`set -euo pipefail
+
+echo "Resetting Barman receive-wal state after PostgreSQL PITR promotion"
+
+barman receive-wal \
+  --reset \
+  %s
+
+barman cron
+
+attempt=1
+
+while [ "${attempt}" -le 12 ]; do
+  echo
+  echo "Barman health-check attempt ${attempt}"
+
+  CHECK_OUTPUT="$(
+    barman check %s 2>&1 || true
+  )"
+
+  printf '%%s\n' "${CHECK_OUTPUT}"
+
+  if printf '%%s\n' "${CHECK_OUTPUT}" |
+      grep -q "replication slot: OK" &&
+    printf '%%s\n' "${CHECK_OUTPUT}" |
+      grep -q "receive-wal running: OK"
+  then
+    echo
+    echo "BARMAN_STREAMING_STABILIZATION_OK"
+    exit 0
+  fi
+
+  barman cron
+  attempt=$((attempt + 1))
+  sleep 5
+done
+
+echo "Barman streaming stabilization failed" >&2
+exit 1`,
+		shellQuote(barmanServerName),
+		shellQuote(barmanServerName),
+	)
+
+	encodedRemoteCommand := base64.StdEncoding.EncodeToString(
+		[]byte(remoteCommand),
+	)
+
+	remoteInvocation := "printf %s " +
+		encodedRemoteCommand +
+		" | base64 -d | bash"
+
+	command := fmt.Sprintf(
+		`set -euo pipefail
+
+echo "Starting post-PITR Barman stabilization"
+
+ssh \
+  -i /etc/barman-ssh/id_ed25519 \
+  -l %s \
+  -o UserKnownHostsFile=/etc/barman-ssh/known_hosts \
+  -o StrictHostKeyChecking=yes \
+  -o IdentitiesOnly=yes \
+  -o PreferredAuthentications=publickey \
+  -o PasswordAuthentication=no \
+  -o BatchMode=yes \
+  %s \
+  %s
+
+echo
+echo "POST_RESTORE_STABILIZATION_JOB_OK"
+`,
+		shellQuote(barmanUser),
+		shellQuote(cluster.Spec.Backup.BarmanHost),
+		shellQuote(remoteInvocation),
+	)
+
+	stabilizationLabels := map[string]string{}
+	for key, value := range labels {
+		stabilizationLabels[key] = value
+	}
+
+	stabilizationLabels["app.kubernetes.io/component"] =
+		"restore-stabilization"
+
+	stabilizationLabels["database.iheb.local/restore-request"] =
+		cluster.Spec.Restore.RequestID
+
+	ttlSecondsAfterFinished := int32(
+		3600,
+	)
+
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: restoreStabilizationJobName(
+				cluster,
+			),
+			Namespace: cluster.Namespace,
+			Labels:    stabilizationLabels,
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit: int32Ptr(
+				0,
+			),
+			TTLSecondsAfterFinished: &ttlSecondsAfterFinished,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: stabilizationLabels,
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:            "stabilize",
+							Image:           image,
+							ImagePullPolicy: corev1.PullAlways,
+							Command: []string{
+								"/bin/bash",
+								"-lc",
+							},
+							Args: []string{
+								command,
+							},
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU: resource.MustParse(
+										"25m",
+									),
+									corev1.ResourceMemory: resource.MustParse(
+										"32Mi",
+									),
+								},
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU: resource.MustParse(
+										"250m",
+									),
+									corev1.ResourceMemory: resource.MustParse(
+										"256Mi",
+									),
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "barman-ssh",
+									MountPath: barmanSSHRuntimeDirectory,
+									ReadOnly:  true,
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
 						{
 							Name: "barman-ssh",
 							VolumeSource: corev1.VolumeSource{

@@ -1,0 +1,2 @@
+NAME                                                   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+postgres-operator-controller-manager-metrics-service   ClusterIP   172.30.143.152   <none>        8443/TCP   5d4h

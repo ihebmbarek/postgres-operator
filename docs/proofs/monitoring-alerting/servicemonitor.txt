@@ -1,0 +1,2 @@
+NAME                                                   AGE
+postgres-operator-controller-manager-metrics-monitor   131m

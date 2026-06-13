@@ -1,0 +1,2 @@
+NAME                READY   STATUS    RESTARTS   AGE   IP             NODE       NOMINATED NODE   READINESS GATES
+sample-postgres-0   1/1     Running   1          27h   10.130.0.168   master03   <none>           <none>

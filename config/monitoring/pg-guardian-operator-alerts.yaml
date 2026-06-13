@@ -1,0 +1,49 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pg-guardian-operator-alerts
+  namespace: postgres-operator-system
+  labels:
+    app.kubernetes.io/name: postgres-operator
+    app.kubernetes.io/managed-by: pg-guardian
+spec:
+  groups:
+    - name: pg-guardian.operator.rules
+      rules:
+        - alert: PGGuardianOperatorDown
+          expr: |
+            absent(
+              up{
+                namespace="postgres-operator-system",
+                service="postgres-operator-controller-manager-metrics-service"
+              } == 1
+            )
+            or
+            up{
+              namespace="postgres-operator-system",
+              service="postgres-operator-controller-manager-metrics-service"
+            } == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: operator
+          annotations:
+            summary: PG Guardian Operator metrics endpoint is unavailable
+            description: The PG Guardian controller metrics endpoint has been missing or unreachable for more than two minutes.
+
+        - alert: PGGuardianReconcileErrors
+          expr: |
+            increase(
+              controller_runtime_reconcile_total{
+                namespace="postgres-operator-system",
+                controller="postgresqlcluster",
+                result="error"
+              }[10m]
+            ) > 0
+          for: 1m
+          labels:
+            severity: warning
+            component: operator
+          annotations:
+            summary: PG Guardian reconciliation errors detected
+            description: The PostgreSQLCluster reconciler reported one or more errors during the last ten minutes.

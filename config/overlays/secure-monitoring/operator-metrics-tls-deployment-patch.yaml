@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-operator-controller-manager
+  namespace: postgres-operator-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: manager
+          args:
+            - --metrics-bind-address=:8443
+            - --metrics-cert-path=/tmp/k8s-metrics-server/metrics-certs
+            - --leader-elect
+            - --health-probe-bind-address=:8081
+          volumeMounts:
+            - name: metrics-certs
+              mountPath: /tmp/k8s-metrics-server/metrics-certs
+              readOnly: true
+      volumes:
+        - name: metrics-certs
+          secret:
+            secretName: postgres-operator-metrics-serving-cert

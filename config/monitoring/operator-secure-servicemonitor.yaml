@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-operator-controller-manager-metrics-monitor
+  namespace: postgres-operator-system
+  labels:
+    app.kubernetes.io/name: postgres-operator
+    app.kubernetes.io/managed-by: pg-guardian
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-operator
+      control-plane: controller-manager
+  endpoints:
+    - port: https
+      path: /metrics
+      scheme: https
+      interval: 30s
+      scrapeTimeout: 10s
+      authorization:
+        type: Bearer
+        credentials:
+          name: pg-guardian-metrics-scraper-token
+          key: token
+      tlsConfig:
+        ca:
+          configMap:
+            name: postgres-operator-metrics-ca
+            key: service-ca.crt
+        serverName: postgres-operator-controller-manager-metrics-service.postgres-operator-system.svc

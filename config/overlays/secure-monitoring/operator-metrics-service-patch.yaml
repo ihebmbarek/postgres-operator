@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-operator-controller-manager-metrics-service
+  namespace: postgres-operator-system
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: postgres-operator-metrics-serving-cert

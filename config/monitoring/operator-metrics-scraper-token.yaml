@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-guardian-metrics-scraper-token
+  namespace: postgres-operator-system
+  annotations:
+    kubernetes.io/service-account.name: pg-guardian-metrics-scraper
+type: kubernetes.io/service-account-token

@@ -63,6 +63,7 @@ type PostgreSQLClusterReconciler struct {
 // +kubebuilder:rbac:groups=database.iheb.local,resources=postgresqlclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=database.iheb.local,resources=postgresqlclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete

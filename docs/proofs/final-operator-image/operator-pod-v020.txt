@@ -1,0 +1,2 @@
+NAME                                                    READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+postgres-operator-controller-manager-54877859c5-sn4r4   1/1     Running   0          4m26s   10.130.0.197   master03   <none>           <none>

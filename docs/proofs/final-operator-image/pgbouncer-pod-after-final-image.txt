@@ -1,0 +1,1 @@
+sample-postgres-pgbouncer-6b5b4f86f9-hzrsv     1/1     Running     0          40m

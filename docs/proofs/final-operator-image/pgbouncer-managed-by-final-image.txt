@@ -1,0 +1,3 @@
+deployment.apps/sample-postgres-pgbouncer   1/1     1            1           40m
+service/sample-postgres-pgbouncer   ClusterIP   172.30.197.106   <none>        6432/TCP         40m
+configmap/sample-postgres-pgbouncer-config   1      40m

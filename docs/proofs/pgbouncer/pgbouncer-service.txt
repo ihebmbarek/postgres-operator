@@ -1,0 +1,2 @@
+NAME                        TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE     SELECTOR
+sample-postgres-pgbouncer   ClusterIP   172.30.197.106   <none>        6432/TCP   4m59s   app.kubernetes.io/component=pgbouncer,app=sample-postgres,database.iheb.local/pgbouncer=sample-postgres,managed=postgres-operator

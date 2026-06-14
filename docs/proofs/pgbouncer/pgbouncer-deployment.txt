@@ -1,0 +1,2 @@
+NAME                        READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES                               SELECTOR
+sample-postgres-pgbouncer   1/1     1            1           4m59s   pgbouncer    docker.io/edoburu/pgbouncer:latest   app=sample-postgres,app.kubernetes.io/component=pgbouncer,database.iheb.local/pgbouncer=sample-postgres,managed=postgres-operator

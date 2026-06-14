@@ -1,0 +1,51 @@
+apiVersion: v1
+data:
+  start-pgbouncer.sh: |
+    #!/bin/sh
+    set -eu
+
+    cat > /tmp/userlist.txt <<EOF
+    "${POSTGRES_USER}" "${POSTGRES_PASSWORD}"
+    EOF
+
+    cat > /tmp/pgbouncer.ini <<EOF
+    [databases]
+    ${POSTGRES_DB} = host=sample-postgres port=5432 dbname=${POSTGRES_DB} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}
+    postgres = host=sample-postgres port=5432 dbname=postgres user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    auth_type = plain
+    auth_file = /tmp/userlist.txt
+    pool_mode = transaction
+    max_client_conn = 100
+    default_pool_size = 20
+    ignore_startup_parameters = extra_float_digits
+    server_reset_query = DISCARD ALL
+    log_connections = 1
+    log_disconnections = 1
+    admin_users = ${POSTGRES_USER}
+    stats_users = ${POSTGRES_USER}
+    EOF
+
+    exec pgbouncer /tmp/pgbouncer.ini
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2026-06-14T14:55:54Z"
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: pgbouncer
+    database.iheb.local/pgbouncer: sample-postgres
+    managed: postgres-operator
+  name: sample-postgres-pgbouncer-config
+  namespace: alpha
+  ownerReferences:
+  - apiVersion: database.iheb.local/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: PostgreSQLCluster
+    name: sample-postgres
+    uid: 7b0a0db1-90d3-48c3-b485-5f558e2aa7b1
+  resourceVersion: "36398518"
+  uid: 364d52bf-5e55-4a9d-94d3-db51b6ea0ab1

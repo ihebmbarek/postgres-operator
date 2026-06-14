@@ -1,0 +1,2 @@
+NAME                                         READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+sample-postgres-pgbouncer-6b5b4f86f9-hzrsv   1/1     Running   0          4m59s   10.130.0.188   master03   <none>           <none>

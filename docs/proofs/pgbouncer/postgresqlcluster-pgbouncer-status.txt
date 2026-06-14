@@ -1,0 +1,2 @@
+NAME              PHASE     READY   POSTGRES POD        BACKUP   RESTORE    PGBOUNCER   AGE
+sample-postgres   Running   true    sample-postgres-0   true     Disabled   Available   19d

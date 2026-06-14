@@ -1,0 +1,6 @@
+ current_database | current_user |              now              
+------------------+--------------+-------------------------------
+ appdb            | appuser      | 2026-06-14 15:01:05.665904+00
+(1 row)
+
+pod "pgbouncer-test-clean" deleted from alpha namespace

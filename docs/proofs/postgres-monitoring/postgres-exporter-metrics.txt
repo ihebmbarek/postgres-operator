@@ -1,0 +1,5 @@
+pg_database_size_bytes{datname="appdb"} 7.871511e+06
+pg_database_size_bytes{datname="postgres"} 7.699479e+06
+pg_database_size_bytes{datname="template0"} 7.537167e+06
+pg_database_size_bytes{datname="template1"} 7.594511e+06
+pg_up 1

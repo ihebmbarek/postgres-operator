@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-postgres-exporter
+  namespace: alpha
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: postgres-exporter
+    managed: postgres-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sample-postgres
+      app.kubernetes.io/component: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app: sample-postgres
+        app.kubernetes.io/component: postgres-exporter
+        managed: postgres-operator
+    spec:
+      containers:
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9187
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: sample-postgres-credentials
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: sample-postgres-credentials
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sample-postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: DATA_SOURCE_NAME
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@sample-postgres.alpha.svc.cluster.local:5432/$(POSTGRES_DB)?sslmode=disable"
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-postgres-exporter
+  namespace: alpha
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: postgres-exporter
+    managed: postgres-operator
+spec:
+  type: ClusterIP
+  selector:
+    app: sample-postgres
+    app.kubernetes.io/component: postgres-exporter
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sample-postgres-exporter
+  namespace: alpha
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: postgres-exporter
+    managed: postgres-operator
+spec:
+  selector:
+    matchLabels:
+      app: sample-postgres
+      app.kubernetes.io/component: postgres-exporter
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sample-postgres-database-alerts
+  namespace: alpha
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: postgres-alerts
+    managed: postgres-operator
+spec:
+  groups:
+    - name: pg-guardian.database.rules
+      rules:
+        - alert: PGGuardianPostgreSQLDown
+          expr: pg_up{namespace="alpha",service="sample-postgres-exporter"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            namespace: alpha
+            component: database
+          annotations:
+            summary: "PostgreSQL database is down"
+            description: "The postgres_exporter cannot connect to the sample-postgres database."

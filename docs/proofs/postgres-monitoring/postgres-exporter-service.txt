@@ -1,0 +1,2 @@
+NAME                       TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE     SELECTOR
+sample-postgres-exporter   ClusterIP   172.30.108.158   <none>        9187/TCP   6m11s   app.kubernetes.io/component=postgres-exporter,app=sample-postgres

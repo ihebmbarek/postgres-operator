@@ -1,0 +1,2 @@
+NAME                       READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS          IMAGES                                                  SELECTOR
+sample-postgres-exporter   1/1     1            1           6m12s   postgres-exporter   quay.io/prometheuscommunity/postgres-exporter:v0.15.0   app=sample-postgres,app.kubernetes.io/component=postgres-exporter

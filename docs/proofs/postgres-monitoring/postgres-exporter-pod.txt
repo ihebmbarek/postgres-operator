@@ -1,0 +1,2 @@
+NAME                                       READY   STATUS    RESTARTS   AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+sample-postgres-exporter-5c5f447f9-wllrb   1/1     Running   0          6m12s   10.130.0.192   master03   <none>           <none>

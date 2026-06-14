@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"monitoring.coreos.com/v1","kind":"PrometheusRule","metadata":{"annotations":{},"labels":{"app":"sample-postgres","app.kubernetes.io/component":"postgres-alerts","managed":"postgres-operator"},"name":"sample-postgres-database-alerts","namespace":"alpha"},"spec":{"groups":[{"name":"pg-guardian.database.rules","rules":[{"alert":"PGGuardianPostgreSQLDown","annotations":{"description":"The postgres_exporter cannot connect to the sample-postgres database.","summary":"PostgreSQL database is down"},"expr":"pg_up{namespace=\"alpha\",service=\"sample-postgres-exporter\"} == 0","for":"2m","labels":{"component":"database","namespace":"alpha","severity":"critical"}}]}]}}
+  creationTimestamp: "2026-06-14T15:10:19Z"
+  generation: 1
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: postgres-alerts
+    managed: postgres-operator
+  name: sample-postgres-database-alerts
+  namespace: alpha
+  resourceVersion: "36410126"
+  uid: 80f120ae-c0c9-4e27-b6f2-92c2abd9bcb6
+spec:
+  groups:
+  - name: pg-guardian.database.rules
+    rules:
+    - alert: PGGuardianPostgreSQLDown
+      annotations:
+        description: The postgres_exporter cannot connect to the sample-postgres database.
+        summary: PostgreSQL database is down
+      expr: pg_up{namespace="alpha",service="sample-postgres-exporter"} == 0
+      for: 2m
+      labels:
+        component: database
+        namespace: alpha
+        severity: critical

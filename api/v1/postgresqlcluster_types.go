@@ -113,6 +113,27 @@ type RestoreSpec struct {
 	PreserveExistingData bool `json:"preserveExistingData,omitempty"`
 }
 
+// PgBouncerSpec defines the optional PgBouncer connection pooler configuration.
+type PgBouncerSpec struct {
+	// Enabled controls whether the operator deploys PgBouncer.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Replicas defines the number of PgBouncer pods.
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Image is the PgBouncer container image.
+	Image string `json:"image,omitempty"`
+
+	// PoolMode defines the PgBouncer pooling mode: session, transaction, or statement.
+	PoolMode string `json:"poolMode,omitempty"`
+
+	// MaxClientConn defines the maximum number of client connections accepted by PgBouncer.
+	MaxClientConn int32 `json:"maxClientConn,omitempty"`
+
+	// DefaultPoolSize defines the default number of server connections per pool.
+	DefaultPoolSize int32 `json:"defaultPoolSize,omitempty"`
+}
+
 // PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
 type PostgreSQLClusterSpec struct {
 	PostgresVersion string `json:"postgresVersion,omitempty"`
@@ -141,6 +162,9 @@ type PostgreSQLClusterSpec struct {
 	// Restore defines an optional Barman PITR request.
 	// Restore must remain disabled during normal operation.
 	Restore RestoreSpec `json:"restore,omitempty"`
+
+	// PgBouncer defines the optional connection pooler configuration.
+	PgBouncer PgBouncerSpec `json:"pgbouncer,omitempty"`
 }
 
 // PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
@@ -197,6 +221,15 @@ type PostgreSQLClusterStatus struct {
 
 	// LastRestoreTime records when the most recent successful restore completed.
 	LastRestoreTime *metav1.Time `json:"lastRestoreTime,omitempty"`
+
+	// PgBouncerEnabled indicates whether PgBouncer is enabled for this cluster.
+	PgBouncerEnabled bool `json:"pgbouncerEnabled,omitempty"`
+
+	// PgBouncerPhase describes the current PgBouncer deployment state.
+	PgBouncerPhase string `json:"pgbouncerPhase,omitempty"`
+
+	// PgBouncerService is the generated Service used by applications to connect through PgBouncer.
+	PgBouncerService string `json:"pgbouncerService,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -206,6 +239,7 @@ type PostgreSQLClusterStatus struct {
 // +kubebuilder:printcolumn:name="Postgres Pod",type=string,JSONPath=`.status.postgresPod`
 // +kubebuilder:printcolumn:name="Backup",type=boolean,JSONPath=`.status.backupEnabled`
 // +kubebuilder:printcolumn:name="Restore",type=string,JSONPath=`.status.restorePhase`
+// +kubebuilder:printcolumn:name="PgBouncer",type=string,JSONPath=`.status.pgbouncerPhase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // PostgreSQLCluster is the Schema for the postgresqlclusters API.

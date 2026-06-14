@@ -223,6 +223,14 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 
+	if err := r.reconcilePgBouncer(
+		ctx,
+		&cluster,
+		labels,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	statefulSet := r.buildStatefulSet(
 		&cluster,
 		labels,
@@ -2798,6 +2806,731 @@ func (r *PostgreSQLClusterReconciler) reconcileBarmanNodePortService(
 	)
 }
 
+func pgBouncerName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return cluster.Name + "-pgbouncer"
+}
+
+func pgBouncerConfigMapName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return cluster.Name + "-pgbouncer-config"
+}
+
+func pgBouncerLabels(
+	cluster *databasev1.PostgreSQLCluster,
+	baseLabels map[string]string,
+) map[string]string {
+	labels := map[string]string{}
+
+	for key, value := range baseLabels {
+		labels[key] = value
+	}
+
+	labels["app.kubernetes.io/component"] = "pgbouncer"
+	labels["database.iheb.local/pgbouncer"] = cluster.Name
+
+	return labels
+}
+
+func effectivePgBouncerImage(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	if cluster.Spec.PgBouncer.Image != "" {
+		return cluster.Spec.PgBouncer.Image
+	}
+
+	return "docker.io/edoburu/pgbouncer:latest"
+}
+
+func effectivePgBouncerReplicas(
+	cluster *databasev1.PostgreSQLCluster,
+) int32 {
+	if cluster.Spec.PgBouncer.Replicas > 0 {
+		return cluster.Spec.PgBouncer.Replicas
+	}
+
+	return 1
+}
+
+func effectivePgBouncerPoolMode(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	if cluster.Spec.PgBouncer.PoolMode != "" {
+		return cluster.Spec.PgBouncer.PoolMode
+	}
+
+	return "transaction"
+}
+
+func effectivePgBouncerMaxClientConn(
+	cluster *databasev1.PostgreSQLCluster,
+) int32 {
+	if cluster.Spec.PgBouncer.MaxClientConn > 0 {
+		return cluster.Spec.PgBouncer.MaxClientConn
+	}
+
+	return 100
+}
+
+func effectivePgBouncerDefaultPoolSize(
+	cluster *databasev1.PostgreSQLCluster,
+) int32 {
+	if cluster.Spec.PgBouncer.DefaultPoolSize > 0 {
+		return cluster.Spec.PgBouncer.DefaultPoolSize
+	}
+
+	return 20
+}
+
+func (r *PostgreSQLClusterReconciler) reconcilePgBouncer(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	baseLabels map[string]string,
+) error {
+	log := logf.FromContext(ctx)
+
+	if !cluster.Spec.PgBouncer.Enabled {
+		cluster.Status.PgBouncerEnabled = false
+		cluster.Status.PgBouncerPhase = "Disabled"
+		cluster.Status.PgBouncerService = ""
+
+		if err := r.deletePgBouncerDeployment(ctx, cluster); err != nil {
+			return err
+		}
+
+		if err := r.deletePgBouncerService(ctx, cluster); err != nil {
+			return err
+		}
+
+		if err := r.deletePgBouncerConfigMap(ctx, cluster); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	labels := pgBouncerLabels(
+		cluster,
+		baseLabels,
+	)
+
+	if err := r.reconcilePgBouncerConfigMap(
+		ctx,
+		cluster,
+		labels,
+	); err != nil {
+		return err
+	}
+
+	if err := r.reconcilePgBouncerService(
+		ctx,
+		cluster,
+		labels,
+	); err != nil {
+		return err
+	}
+
+	availableReplicas, err := r.reconcilePgBouncerDeployment(
+		ctx,
+		cluster,
+		labels,
+	)
+	if err != nil {
+		return err
+	}
+
+	cluster.Status.PgBouncerEnabled = true
+	cluster.Status.PgBouncerService = pgBouncerName(cluster)
+
+	if availableReplicas >= effectivePgBouncerReplicas(cluster) {
+		cluster.Status.PgBouncerPhase = "Available"
+	} else {
+		cluster.Status.PgBouncerPhase = "Deploying"
+	}
+
+	log.Info(
+		"PgBouncer reconciliation completed",
+		"name",
+		pgBouncerName(cluster),
+		"phase",
+		cluster.Status.PgBouncerPhase,
+	)
+
+	return nil
+}
+
+func (r *PostgreSQLClusterReconciler) deletePgBouncerDeployment(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+) error {
+	var deployment appsv1.Deployment
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      pgBouncerName(cluster),
+			Namespace: cluster.Namespace,
+		},
+		&deployment,
+	)
+
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return r.Delete(
+		ctx,
+		&deployment,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) deletePgBouncerService(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+) error {
+	var service corev1.Service
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      pgBouncerName(cluster),
+			Namespace: cluster.Namespace,
+		},
+		&service,
+	)
+
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return r.Delete(
+		ctx,
+		&service,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) deletePgBouncerConfigMap(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+) error {
+	var configMap corev1.ConfigMap
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      pgBouncerConfigMapName(cluster),
+			Namespace: cluster.Namespace,
+		},
+		&configMap,
+	)
+
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return r.Delete(
+		ctx,
+		&configMap,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) reconcilePgBouncerConfigMap(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) error {
+	log := logf.FromContext(ctx)
+
+	desiredConfigMap := r.buildPgBouncerConfigMap(
+		cluster,
+		labels,
+	)
+
+	if err := ctrl.SetControllerReference(
+		cluster,
+		desiredConfigMap,
+		r.Scheme,
+	); err != nil {
+		return err
+	}
+
+	var existingConfigMap corev1.ConfigMap
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      desiredConfigMap.Name,
+			Namespace: desiredConfigMap.Namespace,
+		},
+		&existingConfigMap,
+	)
+
+	if apierrors.IsNotFound(err) {
+		log.Info(
+			"Creating PgBouncer ConfigMap",
+			"name",
+			desiredConfigMap.Name,
+		)
+
+		return r.Create(
+			ctx,
+			desiredConfigMap,
+		)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if reflect.DeepEqual(
+		existingConfigMap.Data,
+		desiredConfigMap.Data,
+	) &&
+		reflect.DeepEqual(
+			existingConfigMap.Labels,
+			desiredConfigMap.Labels,
+		) {
+		return nil
+	}
+
+	existingConfigMap.Data = desiredConfigMap.Data
+	existingConfigMap.Labels = desiredConfigMap.Labels
+
+	log.Info(
+		"Updating PgBouncer ConfigMap",
+		"name",
+		existingConfigMap.Name,
+	)
+
+	return r.Update(
+		ctx,
+		&existingConfigMap,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) buildPgBouncerConfigMap(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) *corev1.ConfigMap {
+	startScript := fmt.Sprintf(
+		`#!/bin/sh
+set -eu
+
+cat > /tmp/userlist.txt <<EOF
+"${POSTGRES_USER}" "${POSTGRES_PASSWORD}"
+EOF
+
+cat > /tmp/pgbouncer.ini <<EOF
+[databases]
+${POSTGRES_DB} = host=%s port=5432 dbname=${POSTGRES_DB} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}
+postgres = host=%s port=5432 dbname=postgres user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}
+
+[pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+auth_type = plain
+auth_file = /tmp/userlist.txt
+pool_mode = %s
+max_client_conn = %d
+default_pool_size = %d
+ignore_startup_parameters = extra_float_digits
+server_reset_query = DISCARD ALL
+log_connections = 1
+log_disconnections = 1
+admin_users = ${POSTGRES_USER}
+stats_users = ${POSTGRES_USER}
+EOF
+
+exec pgbouncer /tmp/pgbouncer.ini
+`,
+		cluster.Name,
+		cluster.Name,
+		effectivePgBouncerPoolMode(cluster),
+		effectivePgBouncerMaxClientConn(cluster),
+		effectivePgBouncerDefaultPoolSize(cluster),
+	)
+
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pgBouncerConfigMapName(cluster),
+			Namespace: cluster.Namespace,
+			Labels:    labels,
+		},
+		Data: map[string]string{
+			"start-pgbouncer.sh": startScript,
+		},
+	}
+}
+
+func (r *PostgreSQLClusterReconciler) reconcilePgBouncerService(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) error {
+	log := logf.FromContext(ctx)
+
+	desiredService := r.buildPgBouncerService(
+		cluster,
+		labels,
+	)
+
+	if err := ctrl.SetControllerReference(
+		cluster,
+		desiredService,
+		r.Scheme,
+	); err != nil {
+		return err
+	}
+
+	var existingService corev1.Service
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      desiredService.Name,
+			Namespace: desiredService.Namespace,
+		},
+		&existingService,
+	)
+
+	if apierrors.IsNotFound(err) {
+		log.Info(
+			"Creating PgBouncer Service",
+			"name",
+			desiredService.Name,
+		)
+
+		return r.Create(
+			ctx,
+			desiredService,
+		)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	needsUpdate := false
+
+	if !reflect.DeepEqual(
+		existingService.Labels,
+		desiredService.Labels,
+	) {
+		existingService.Labels = desiredService.Labels
+		needsUpdate = true
+	}
+
+	if !reflect.DeepEqual(
+		existingService.Spec.Selector,
+		desiredService.Spec.Selector,
+	) {
+		existingService.Spec.Selector = desiredService.Spec.Selector
+		needsUpdate = true
+	}
+
+	if !reflect.DeepEqual(
+		existingService.Spec.Ports,
+		desiredService.Spec.Ports,
+	) {
+		existingService.Spec.Ports = desiredService.Spec.Ports
+		needsUpdate = true
+	}
+
+	if !needsUpdate {
+		return nil
+	}
+
+	log.Info(
+		"Updating PgBouncer Service",
+		"name",
+		existingService.Name,
+	)
+
+	return r.Update(
+		ctx,
+		&existingService,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) buildPgBouncerService(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pgBouncerName(cluster),
+			Namespace: cluster.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: labels,
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "pgbouncer",
+					Protocol:   corev1.ProtocolTCP,
+					Port:       6432,
+					TargetPort: intstr.FromInt32(6432),
+				},
+			},
+		},
+	}
+}
+
+func (r *PostgreSQLClusterReconciler) reconcilePgBouncerDeployment(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) (int32, error) {
+	log := logf.FromContext(ctx)
+
+	desiredDeployment := r.buildPgBouncerDeployment(
+		cluster,
+		labels,
+	)
+
+	if err := ctrl.SetControllerReference(
+		cluster,
+		desiredDeployment,
+		r.Scheme,
+	); err != nil {
+		return 0, err
+	}
+
+	var existingDeployment appsv1.Deployment
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      desiredDeployment.Name,
+			Namespace: desiredDeployment.Namespace,
+		},
+		&existingDeployment,
+	)
+
+	if apierrors.IsNotFound(err) {
+		log.Info(
+			"Creating PgBouncer Deployment",
+			"name",
+			desiredDeployment.Name,
+		)
+
+		return 0, r.Create(
+			ctx,
+			desiredDeployment,
+		)
+	}
+
+	if err != nil {
+		return 0, err
+	}
+
+	needsUpdate := false
+
+	if !reflect.DeepEqual(
+		existingDeployment.Labels,
+		desiredDeployment.Labels,
+	) {
+		existingDeployment.Labels = desiredDeployment.Labels
+		needsUpdate = true
+	}
+
+	if !reflect.DeepEqual(
+		existingDeployment.Spec.Replicas,
+		desiredDeployment.Spec.Replicas,
+	) {
+		existingDeployment.Spec.Replicas =
+			desiredDeployment.Spec.Replicas
+		needsUpdate = true
+	}
+
+	if !reflect.DeepEqual(
+		existingDeployment.Spec.Template,
+		desiredDeployment.Spec.Template,
+	) {
+		existingDeployment.Spec.Template =
+			desiredDeployment.Spec.Template
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		log.Info(
+			"Updating PgBouncer Deployment",
+			"name",
+			existingDeployment.Name,
+		)
+
+		if err := r.Update(
+			ctx,
+			&existingDeployment,
+		); err != nil {
+			return 0, err
+		}
+	}
+
+	return existingDeployment.Status.AvailableReplicas, nil
+}
+
+func (r *PostgreSQLClusterReconciler) buildPgBouncerDeployment(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+) *appsv1.Deployment {
+	replicas := effectivePgBouncerReplicas(cluster)
+	configMapName := pgBouncerConfigMapName(cluster)
+	credentialsSecretName := cluster.Name + "-credentials"
+
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pgBouncerName(cluster),
+			Namespace: cluster.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:            "pgbouncer",
+							Image:           effectivePgBouncerImage(cluster),
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Command: []string{
+								"/bin/sh",
+								"/opt/pgbouncer/start-pgbouncer.sh",
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "pgbouncer",
+									ContainerPort: 6432,
+									Protocol:      corev1.ProtocolTCP,
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name:  "POSTGRES_HOST",
+									Value: cluster.Name,
+								},
+								{
+									Name: "POSTGRES_DB",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: credentialsSecretName,
+											},
+											Key: "POSTGRES_DB",
+										},
+									},
+								},
+								{
+									Name: "POSTGRES_USER",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: credentialsSecretName,
+											},
+											Key: "POSTGRES_USER",
+										},
+									},
+								},
+								{
+									Name: "POSTGRES_PASSWORD",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: credentialsSecretName,
+											},
+											Key: "POSTGRES_PASSWORD",
+										},
+									},
+								},
+							},
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt32(6432),
+									},
+								},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       10,
+							},
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt32(6432),
+									},
+								},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       20,
+							},
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU: resource.MustParse(
+										"50m",
+									),
+									corev1.ResourceMemory: resource.MustParse(
+										"64Mi",
+									),
+								},
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU: resource.MustParse(
+										"250m",
+									),
+									corev1.ResourceMemory: resource.MustParse(
+										"256Mi",
+									),
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "pgbouncer-config",
+									MountPath: "/opt/pgbouncer/start-pgbouncer.sh",
+									SubPath:   "start-pgbouncer.sh",
+									ReadOnly:  true,
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "pgbouncer-config",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: configMapName,
+									},
+									DefaultMode: int32Ptr(
+										0755,
+									),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func (r *PostgreSQLClusterReconciler) reconcileBackupCronJob(
 	ctx context.Context,
 	cluster *databasev1.PostgreSQLCluster,
@@ -3472,6 +4205,9 @@ func (r *PostgreSQLClusterReconciler) SetupWithManager(
 		).
 		Owns(
 			&appsv1.StatefulSet{},
+		).
+		Owns(
+			&appsv1.Deployment{},
 		).
 		Owns(
 			&corev1.Service{},

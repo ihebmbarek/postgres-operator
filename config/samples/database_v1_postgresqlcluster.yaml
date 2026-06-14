@@ -33,5 +33,13 @@ spec:
     suspendScheduledBackups: false
     backupImage: quay.io/iheb_mbarek/postgres-barman:latest
 
+  pgbouncer:
+    enabled: true
+    replicas: 1
+    image: docker.io/edoburu/pgbouncer:latest
+    poolMode: transaction
+    maxClientConn: 100
+    defaultPoolSize: 20
+
   restore:
     enabled: false

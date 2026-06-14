@@ -30,6 +30,9 @@ spec:
     - jsonPath: .status.restorePhase
       name: Restore
       type: string
+    - jsonPath: .status.pgbouncerPhase
+      name: PgBouncer
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -135,6 +138,34 @@ spec:
                 type: string
               memoryRequest:
                 type: string
+              pgbouncer:
+                description: PgBouncer defines the optional connection pooler configuration.
+                properties:
+                  defaultPoolSize:
+                    description: DefaultPoolSize defines the default number of server
+                      connections per pool.
+                    format: int32
+                    type: integer
+                  enabled:
+                    description: Enabled controls whether the operator deploys PgBouncer.
+                    type: boolean
+                  image:
+                    description: Image is the PgBouncer container image.
+                    type: string
+                  maxClientConn:
+                    description: MaxClientConn defines the maximum number of client
+                      connections accepted by PgBouncer.
+                    format: int32
+                    type: integer
+                  poolMode:
+                    description: 'PoolMode defines the PgBouncer pooling mode: session,
+                      transaction, or statement.'
+                    type: string
+                  replicas:
+                    description: Replicas defines the number of PgBouncer pods.
+                    format: int32
+                    type: integer
+                type: object
               postgresVersion:
                 type: string
               restore:
@@ -242,6 +273,18 @@ spec:
                 description: |-
                   ObservedRestoreRequestID records the restore request currently processed
                   or most recently completed by the operator.
+                type: string
+              pgbouncerEnabled:
+                description: PgBouncerEnabled indicates whether PgBouncer is enabled
+                  for this cluster.
+                type: boolean
+              pgbouncerPhase:
+                description: PgBouncerPhase describes the current PgBouncer deployment
+                  state.
+                type: string
+              pgbouncerService:
+                description: PgBouncerService is the generated Service used by applications
+                  to connect through PgBouncer.
                 type: string
               phase:
                 type: string

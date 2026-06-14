@@ -942,6 +942,20 @@ func (r *PostgreSQLClusterReconciler) reconcilePostgresService(
 	)
 }
 
+func copyStringMap(input map[string]string) map[string]string {
+	output := make(map[string]string, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
+}
+
+func postgresComponentLabels(labels map[string]string) map[string]string {
+	postgresLabels := copyStringMap(labels)
+	postgresLabels["app.kubernetes.io/component"] = "postgres"
+	return postgresLabels
+}
+
 func (r *PostgreSQLClusterReconciler) buildService(
 	cluster *databasev1.PostgreSQLCluster,
 	labels map[string]string,
@@ -954,7 +968,7 @@ func (r *PostgreSQLClusterReconciler) buildService(
 		},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: "None",
-			Selector:  labels,
+			Selector:  postgresComponentLabels(labels),
 			Ports: []corev1.ServicePort{
 				{
 					Name: "postgres",
@@ -1131,11 +1145,11 @@ chmod 755 /etc/barman-ssh/ssh
 			ServiceName: cluster.Name,
 			Replicas:    &replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
+				MatchLabels: postgresComponentLabels(labels),
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels: postgresComponentLabels(labels),
 					Annotations: map[string]string{
 						"database.iheb.local/config-hash": configHash,
 					},
@@ -2710,7 +2724,7 @@ func (r *PostgreSQLClusterReconciler) reconcileBarmanNodePortService(
 		Spec: corev1.ServiceSpec{
 			Type:                  corev1.ServiceTypeNodePort,
 			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeLocal,
-			Selector:              labels,
+			Selector:              postgresComponentLabels(labels),
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "postgres",

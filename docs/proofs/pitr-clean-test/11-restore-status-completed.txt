@@ -1,0 +1,4 @@
+Completed
+restore and post-PITR streaming stabilization completed successfully; disable spec.restore.enabled to resume normal operation
+sample-postgres-restore-stabilize-clean-pitr-proof-1781457246
+2026-06-14T17:15:17Z

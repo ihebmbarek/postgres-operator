@@ -1,0 +1,6 @@
+ current_database | current_user |              now              
+------------------+--------------+-------------------------------
+ appdb            | appuser      | 2026-06-14 18:41:36.624057+00
+(1 row)
+
+pod "pgbouncer-selector-fix-v023-proof" deleted from alpha namespace

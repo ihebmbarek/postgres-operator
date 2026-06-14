@@ -1,0 +1,6 @@
+ current_database | current_user |              now              
+------------------+--------------+-------------------------------
+ appdb            | appuser      | 2026-06-14 17:31:44.256817+00
+(1 row)
+
+pod "pgbouncer-after-pitr-proof" deleted from alpha namespace

@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: "2026-05-26T13:46:06Z"
+  labels:
+    app: sample-postgres
+    managed: postgres-operator
+  name: sample-postgres
+  namespace: alpha
+  ownerReferences:
+  - apiVersion: database.iheb.local/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: PostgreSQLCluster
+    name: sample-postgres
+    uid: 7b0a0db1-90d3-48c3-b485-5f558e2aa7b1
+  resourceVersion: "36673488"
+  uid: b760a0de-7ccd-410e-8f98-a12e1cba56fb
+spec:
+  clusterIP: None
+  clusterIPs:
+  - None
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: postgres
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: sample-postgres
+    app.kubernetes.io/component: postgres
+    managed: postgres-operator
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}

@@ -1,0 +1,6 @@
+NAME                                                            STATUS     COMPLETIONS   DURATION   AGE
+sample-postgres-barman-backup-29684280                          Complete   1/1           28s        4d15h
+sample-postgres-barman-backup-29685720                          Complete   1/1           29s        3d15h
+sample-postgres-barman-backup-29690040                          Complete   1/1           35s        139m
+sample-postgres-restore-clean-pitr-proof-1781457246             Complete   1/1           31s        92s
+sample-postgres-restore-stabilize-clean-pitr-proof-1781457246   Complete   1/1           19s        42s

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Endpoints
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2026-06-14T18:12:21Z"
+  creationTimestamp: "2026-06-14T14:55:54Z"
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: pgbouncer
+    database.iheb.local/pgbouncer: sample-postgres
+    endpoints.kubernetes.io/managed-by: endpoint-controller
+    managed: postgres-operator
+  name: sample-postgres-pgbouncer
+  namespace: alpha
+  resourceVersion: "36654336"
+  uid: bccc7b93-7837-4a26-9032-5f9f42df0b73
+subsets:
+- addresses:
+  - ip: 10.130.0.229
+    nodeName: master03
+    targetRef:
+      kind: Pod
+      name: sample-postgres-pgbouncer-6b5b4f86f9-l9mx2
+      namespace: alpha
+      uid: a22d826f-5d91-4d07-8a5c-9e862f8f7850
+  ports:
+  - name: pgbouncer
+    port: 6432
+    protocol: TCP

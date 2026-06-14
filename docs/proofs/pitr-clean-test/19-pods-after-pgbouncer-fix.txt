@@ -1,0 +1,10 @@
+NAME                                                              READY   STATUS      RESTARTS      AGE     IP             NODE       NOMINATED NODE   READINESS GATES
+postgres-0                                                        1/1     Running     3             11d     10.128.0.103   master02   <none>           <none>
+sample-postgres-0                                                 1/1     Running     0             41m     10.129.0.14    master01   <none>           <none>
+sample-postgres-barman-backup-29684280-g9bq9                      0/1     Completed   0             4d15h   <none>         master01   <none>           <none>
+sample-postgres-barman-backup-29685720-bzpvq                      0/1     Completed   0             3d15h   <none>         master01   <none>           <none>
+sample-postgres-barman-backup-29690040-mmp4m                      0/1     Completed   0             179m    10.129.0.11    master01   <none>           <none>
+sample-postgres-exporter-5c5f447f9-wllrb                          1/1     Running     1 (40m ago)   165m    10.130.0.192   master03   <none>           <none>
+sample-postgres-pgbouncer-645c54dc6d-75rwt                        1/1     Running     0             24m     10.130.0.221   master03   <none>           <none>
+sample-postgres-restore-clean-pitr-proof-1781457246-7w5pm         0/1     Completed   0             41m     10.129.0.12    master01   <none>           <none>
+sample-postgres-restore-stabilize-clean-pitr-proof-1781457mz57h   0/1     Completed   0             40m     10.128.0.34    master02   <none>           <none>

@@ -1,0 +1,10 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name: pg-guardian-catalog
+  namespace: openshift-marketplace
+spec:
+  sourceType: grpc
+  image: quay.io/iheb_mbarek/postgres-operator-catalog:v0.2.4
+  displayName: PG Guardian Catalog
+  publisher: Iheb Mbarek

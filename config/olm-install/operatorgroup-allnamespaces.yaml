@@ -1,0 +1,6 @@
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: pg-guardian-operatorgroup
+  namespace: pg-guardian-olm
+spec: {}

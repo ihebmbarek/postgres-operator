@@ -13,6 +13,9 @@ jobs:
     name: Test and validate operator
     runs-on: ubuntu-latest
 
+    env:
+      ENVTEST_K8S_VERSION: "1.32.0"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,17 +31,27 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run unit tests
-        run: go test ./api/... ./cmd/... ./internal/controller/...
-
       - name: Install controller-gen
         run: |
           GOBIN=$PWD/bin go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5
           echo "$PWD/bin" >> "$GITHUB_PATH"
 
+      - name: Install envtest binaries
+        run: |
+          GOBIN=$PWD/bin go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+          echo "KUBEBUILDER_ASSETS=$($PWD/bin/setup-envtest use ${ENVTEST_K8S_VERSION} -p path)" >> "$GITHUB_ENV"
+
+      - name: Show envtest assets
+        run: |
+          echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS"
+          ls -lah "$KUBEBUILDER_ASSETS"
+
+      - name: Run unit tests
+        run: go test ./api/... ./cmd/... ./internal/controller/...
+
       - name: Generate manifests
         run: make manifests
 
       - name: Check generated files are committed
-        run: |
-          git diff --exit-code
+        run: git diff --exit-code

@@ -1,0 +1,33 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pg-guardian-operator-alerts
+  namespace: pg-guardian-olm
+  labels:
+    app.kubernetes.io/name: postgres-operator
+    app.kubernetes.io/managed-by: olm
+spec:
+  groups:
+    - name: pg-guardian-operator.rules
+      rules:
+        - alert: PGGuardianOperatorDown
+          expr: absent(up{namespace="pg-guardian-olm",service="postgres-operator-controller-manager-metrics-service"} == 1) or up{namespace="pg-guardian-olm",service="postgres-operator-controller-manager-metrics-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: operator
+            namespace: pg-guardian-olm
+          annotations:
+            summary: "PG Guardian operator metrics endpoint is down"
+            description: "The PG Guardian OLM-installed operator metrics endpoint is missing or unreachable in namespace pg-guardian-olm."
+
+        - alert: PGGuardianHighReconcileErrors
+          expr: increase(controller_runtime_reconcile_errors_total{namespace="pg-guardian-olm"}[10m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+            component: operator
+            namespace: pg-guardian-olm
+          annotations:
+            summary: "PG Guardian operator has reconcile errors"
+            description: "The PG Guardian operator reported more than 3 reconciliation errors in the last 10 minutes."

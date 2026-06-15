@@ -1,0 +1,296 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "database.iheb.local/v1",
+          "kind": "PostgreSQLCluster",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "postgres-operator"
+            },
+            "name": "sample-postgres"
+          },
+          "spec": {
+            "backup": {
+              "archiveTimeout": 60,
+              "backupImage": "quay.io/iheb_mbarek/postgres-barman:latest",
+              "barmanHost": "192.168.180.54",
+              "barmanServerName": "sample-postgres",
+              "barmanUser": "barman",
+              "enabled": true,
+              "exposeService": true,
+              "nodePort": 30433,
+              "replicationAllowedCIDR": "192.168.180.54/32",
+              "schedule": "0 2 * * *",
+              "sshSecretName": "barman-ssh-key",
+              "streamingUser": "streaming_barman",
+              "suspendScheduledBackups": false
+            },
+            "cpuLimit": "500m",
+            "cpuRequest": "250m",
+            "database": "appdb",
+            "image": "quay.io/iheb_mbarek/postgres-barman:latest",
+            "memoryLimit": "512Mi",
+            "memoryRequest": "256Mi",
+            "pgbouncer": {
+              "defaultPoolSize": 20,
+              "enabled": true,
+              "image": "docker.io/edoburu/pgbouncer:latest",
+              "maxClientConn": 100,
+              "poolMode": "transaction",
+              "replicas": 1
+            },
+            "postgresVersion": "16",
+            "restore": {
+              "enabled": false
+            },
+            "storageClassName": "nfs-client",
+            "storageSize": "5Gi",
+            "user": "appuser"
+          }
+        }
+      ]
+    capabilities: Basic Install
+    createdAt: "2026-06-15T15:33:58Z"
+    operators.operatorframework.io/builder: operator-sdk-v1.40.0
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+  name: postgres-operator.v0.2.3
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: PostgreSQLCluster is the Schema for the postgresqlclusters API.
+      displayName: Postgre SQLCluster
+      kind: PostgreSQLCluster
+      name: postgresqlclusters.database.iheb.local
+      version: v1
+  description: PG Guardian is a PostgreSQL Operator for OpenShift that automates PostgreSQL
+    deployment, persistent storage, Barman backup integration, scheduled backups,
+    Point-in-Time Recovery, PgBouncer connection pooling, and OpenShift monitoring
+    and alerting.
+  displayName: PG Guardian operator
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          - persistentvolumeclaims
+          - secrets
+          - services
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - pods
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - apps
+          resources:
+          - deployments
+          - statefulsets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - batch
+          resources:
+          - cronjobs
+          - jobs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - database.iheb.local
+          resources:
+          - postgresqlclusters
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - database.iheb.local
+          resources:
+          - postgresqlclusters/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - database.iheb.local
+          resources:
+          - postgresqlclusters/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: postgres-operator-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: postgres-operator
+          control-plane: controller-manager
+        name: postgres-operator-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: postgres-operator
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                app.kubernetes.io/name: postgres-operator
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --metrics-bind-address=:8443
+                - --leader-elect
+                - --health-probe-bind-address=:8081
+                command:
+                - /manager
+                image: quay.io/iheb_mbarek/postgres-operator:v0.2.3
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: postgres-operator-controller-manager
+              terminationGracePeriodSeconds: 10
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        serviceAccountName: postgres-operator-controller-manager
+    strategy: deployment
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - postgresql
+  - operator
+  - openshift
+  - kubernetes
+  - database
+  - backup
+  - recovery
+  - pitr
+  - barman
+  - pgbouncer
+  - monitoring
+  - prometheus
+  links:
+  - name: Postgres Operator
+    url: https://postgres-operator.domain
+  maturity: alpha
+  provider:
+    name: Iheb Mbarek
+    url: https://github.com/ihebmbarek/postgres-operator
+  version: 0.2.3

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-and-validate:
+    name: Test and validate operator
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Display Go version
+        run: go version
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: go test ./api/... ./cmd/... ./internal/controller/...
+
+      - name: Install controller-gen
+        run: |
+          GOBIN=$PWD/bin go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.5
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      - name: Generate manifests
+        run: make manifests
+
+      - name: Check generated files are committed
+        run: |
+          git diff --exit-code

@@ -17,6 +17,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +32,8 @@ import (
 
 	databasev1 "github.com/ihebmbarek/postgres-operator/api/v1"
 )
+
+const templateHashAnnotation = "database.iheb.local/template-hash"
 
 const (
 	barmanStatusRefreshInterval = 5 * time.Minute
@@ -389,6 +392,165 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func templateWithStableHash(
+	template corev1.PodTemplateSpec,
+) corev1.PodTemplateSpec {
+	template = defaultPodTemplateSpec(
+		template,
+	)
+
+	hashTemplate := template.DeepCopy()
+
+	if hashTemplate.Annotations != nil {
+		delete(
+			hashTemplate.Annotations,
+			templateHashAnnotation,
+		)
+
+		if len(hashTemplate.Annotations) == 0 {
+			hashTemplate.Annotations = nil
+		}
+	}
+
+	rawTemplate, err := json.Marshal(
+		hashTemplate,
+	)
+	if err != nil {
+		return template
+	}
+
+	templateHash := sha256.Sum256(
+		rawTemplate,
+	)
+
+	if template.Annotations == nil {
+		template.Annotations = map[string]string{}
+	}
+
+	template.Annotations[templateHashAnnotation] =
+		base64.RawURLEncoding.EncodeToString(
+			templateHash[:],
+		)
+
+	return template
+}
+
+func podTemplateHash(
+	template corev1.PodTemplateSpec,
+) string {
+	if template.Annotations == nil {
+		return ""
+	}
+
+	return template.Annotations[templateHashAnnotation]
+}
+
+func defaultPodTemplateSpec(
+	template corev1.PodTemplateSpec,
+) corev1.PodTemplateSpec {
+	defaultPodSpecFields(
+		&template.Spec,
+	)
+
+	for index := range template.Spec.InitContainers {
+		defaultContainerFields(
+			&template.Spec.InitContainers[index],
+		)
+	}
+
+	for index := range template.Spec.Containers {
+		defaultContainerFields(
+			&template.Spec.Containers[index],
+		)
+	}
+
+	return template
+}
+
+func defaultPodSpecFields(
+	podSpec *corev1.PodSpec,
+) {
+	if podSpec.DNSPolicy == "" {
+		podSpec.DNSPolicy = corev1.DNSClusterFirst
+	}
+
+	if podSpec.RestartPolicy == "" {
+		podSpec.RestartPolicy = corev1.RestartPolicyAlways
+	}
+
+	if podSpec.SchedulerName == "" {
+		podSpec.SchedulerName = corev1.DefaultSchedulerName
+	}
+
+	if podSpec.TerminationGracePeriodSeconds == nil {
+		terminationGracePeriodSeconds := int64(30)
+		podSpec.TerminationGracePeriodSeconds = &terminationGracePeriodSeconds
+	}
+
+	if podSpec.EnableServiceLinks == nil {
+		enableServiceLinks := true
+		podSpec.EnableServiceLinks = &enableServiceLinks
+	}
+}
+
+func defaultContainerFields(
+	container *corev1.Container,
+) {
+	if container.ImagePullPolicy == "" {
+		container.ImagePullPolicy = defaultImagePullPolicy(
+			container.Image,
+		)
+	}
+
+	if container.TerminationMessagePath == "" {
+		container.TerminationMessagePath = "/dev/termination-log"
+	}
+
+	if container.TerminationMessagePolicy == "" {
+		container.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	}
+}
+
+func defaultImagePullPolicy(
+	image string,
+) corev1.PullPolicy {
+	lastSlash := strings.LastIndex(
+		image,
+		"/",
+	)
+	lastColon := strings.LastIndex(
+		image,
+		":",
+	)
+
+	if lastColon <= lastSlash {
+		return corev1.PullAlways
+	}
+
+	tag := image[lastColon+1:]
+	if tag == "latest" {
+		return corev1.PullAlways
+	}
+
+	return corev1.PullIfNotPresent
+}
+
+func defaultBackupCronJobSpec(
+	cronJob *batchv1.CronJob,
+) {
+	if cronJob.Spec.SuccessfulJobsHistoryLimit == nil {
+		cronJob.Spec.SuccessfulJobsHistoryLimit = int32Ptr(3)
+	}
+
+	if cronJob.Spec.FailedJobsHistoryLimit == nil {
+		cronJob.Spec.FailedJobsHistoryLimit = int32Ptr(1)
+	}
+
+	cronJob.Spec.JobTemplate.Spec.Template = defaultPodTemplateSpec(
+		cronJob.Spec.JobTemplate.Spec.Template,
+	)
 }
 
 func restrictedPodSecurityContext() *corev1.PodSecurityContext {
@@ -1117,8 +1279,10 @@ func (r *PostgreSQLClusterReconciler) buildService(
 			Selector:  postgresComponentLabels(labels),
 			Ports: []corev1.ServicePort{
 				{
-					Name: "postgres",
-					Port: 5432,
+					Name:       "postgres",
+					Protocol:   corev1.ProtocolTCP,
+					Port:       5432,
+					TargetPort: intstr.FromInt32(5432),
 				},
 			},
 		},
@@ -2735,6 +2899,10 @@ func (r *PostgreSQLClusterReconciler) reconcileStatefulSet(
 ) error {
 	log := logf.FromContext(ctx)
 
+	desiredStatefulSet.Spec.Template = templateWithStableHash(
+		desiredStatefulSet.Spec.Template,
+	)
+
 	var existingStatefulSet appsv1.StatefulSet
 	err := r.Get(
 		ctx,
@@ -2774,8 +2942,9 @@ func (r *PostgreSQLClusterReconciler) reconcileStatefulSet(
 		needsUpdate = true
 	}
 
-	if !reflect.DeepEqual(
+	if podTemplateHash(
 		existingStatefulSet.Spec.Template,
+	) != podTemplateHash(
 		desiredStatefulSet.Spec.Template,
 	) {
 		existingStatefulSet.Spec.Template =
@@ -3453,6 +3622,10 @@ func (r *PostgreSQLClusterReconciler) reconcilePgBouncerDeployment(
 		labels,
 	)
 
+	desiredDeployment.Spec.Template = templateWithStableHash(
+		desiredDeployment.Spec.Template,
+	)
+
 	if err := ctrl.SetControllerReference(
 		cluster,
 		desiredDeployment,
@@ -3508,8 +3681,9 @@ func (r *PostgreSQLClusterReconciler) reconcilePgBouncerDeployment(
 		needsUpdate = true
 	}
 
-	if !reflect.DeepEqual(
+	if podTemplateHash(
 		existingDeployment.Spec.Template,
+	) != podTemplateHash(
 		desiredDeployment.Spec.Template,
 	) {
 		existingDeployment.Spec.Template =
@@ -3735,6 +3909,10 @@ func (r *PostgreSQLClusterReconciler) reconcileBackupCronJob(
 		return err
 	}
 
+	defaultBackupCronJobSpec(
+		desiredCronJob,
+	)
+
 	if apierrors.IsNotFound(getErr) {
 		if err := ctrl.SetControllerReference(
 			cluster,
@@ -3762,6 +3940,10 @@ func (r *PostgreSQLClusterReconciler) reconcileBackupCronJob(
 		return getErr
 	}
 
+	defaultBackupCronJobSpec(
+		&existingCronJob,
+	)
+
 	needsUpdate := false
 
 	if !reflect.DeepEqual(
@@ -3772,7 +3954,7 @@ func (r *PostgreSQLClusterReconciler) reconcileBackupCronJob(
 		needsUpdate = true
 	}
 
-	if !reflect.DeepEqual(
+	if !equality.Semantic.DeepEqual(
 		existingCronJob.Spec,
 		desiredCronJob.Spec,
 	) {

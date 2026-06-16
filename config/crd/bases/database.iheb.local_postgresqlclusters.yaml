@@ -33,6 +33,12 @@ spec:
     - jsonPath: .status.pgbouncerPhase
       name: PgBouncer
       type: string
+    - jsonPath: .status.haPhase
+      name: HA
+      type: string
+    - jsonPath: .status.failoverPhase
+      name: Failover
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -132,6 +138,32 @@ spec:
                 type: string
               database:
                 type: string
+              highAvailability:
+                description: HighAvailability defines optional HA readiness and failover
+                  detection settings.
+                properties:
+                  detectionTimeoutSeconds:
+                    description: |-
+                      DetectionTimeoutSeconds defines how long the operator should tolerate
+                      an unhealthy primary before reporting failover as required.
+                    format: int32
+                    type: integer
+                  enabled:
+                    description: Enabled indicates whether HA readiness mode is enabled.
+                    type: boolean
+                  failoverMode:
+                    description: |-
+                      FailoverMode defines how failover should be handled.
+                      Supported initial values: Disabled, Manual, SemiAutomatic.
+                    type: string
+                  replicas:
+                    description: |-
+                      Replicas is the desired PostgreSQL topology size.
+                      A value of 1 means single primary.
+                      A value of 2 or more represents a primary plus standby-ready architecture.
+                    format: int32
+                    type: integer
+                type: object
               image:
                 type: string
               memoryLimit:
@@ -257,11 +289,34 @@ spec:
                 type: integer
               barmanService:
                 type: string
+              failoverPhase:
+                description: |-
+                  FailoverPhase describes the current failover-readiness state.
+                  Example values: Disabled, Healthy, PrimaryUnavailable, RecoveryRequired.
+                type: string
+              failoverReason:
+                description: FailoverReason provides a human-readable explanation
+                  of the latest failover state.
+                type: string
+              haEnabled:
+                description: HAEnabled indicates whether high availability readiness
+                  is enabled.
+                type: boolean
+              haPhase:
+                description: |-
+                  HAPhase describes the current HA topology state.
+                  Example values: Disabled, SinglePrimary, StandbyPlanned, Ready, Degraded.
+                type: string
               lastBackupId:
                 type: string
               lastBackupStatus:
                 type: string
               lastBackupTime:
+                format: date-time
+                type: string
+              lastPrimaryFailureTime:
+                description: LastPrimaryFailureTime records when the operator last
+                  detected primary unavailability.
                 format: date-time
                 type: string
               lastRestoreTime:
@@ -289,6 +344,10 @@ spec:
               phase:
                 type: string
               postgresPod:
+                type: string
+              primaryPod:
+                description: PrimaryPod is the current PostgreSQL primary pod observed
+                  by the operator.
                 type: string
               ready:
                 type: boolean
@@ -319,6 +378,12 @@ spec:
                 description: RestoreTargetTime is the requested PostgreSQL PITR timestamp.
                 format: date-time
                 type: string
+              standbyPods:
+                description: StandbyPods lists standby pod names expected or observed
+                  by the operator.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

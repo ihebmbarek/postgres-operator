@@ -283,14 +283,17 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		&postgresPod,
 	)
 
+	primaryReady := false
+
 	if err != nil {
 		cluster.Status.Phase = "Pending"
 		cluster.Status.Ready = false
 		cluster.Status.PostgresPod = podName
 	} else {
 		cluster.Status.PostgresPod = podName
+		primaryReady = isPodReady(&postgresPod)
 
-		if postgresPod.Status.Phase == corev1.PodRunning {
+		if postgresPod.Status.Phase == corev1.PodRunning && primaryReady {
 			cluster.Status.Phase = "Running"
 			cluster.Status.Ready = true
 		} else {
@@ -298,6 +301,12 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 			cluster.Status.Ready = false
 		}
 	}
+
+	updateHighAvailabilityStatus(
+		&cluster,
+		podName,
+		primaryReady,
+	)
 
 	if cluster.Spec.Backup.Enabled {
 		cluster.Status.BackupEnabled = true
@@ -380,6 +389,143 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func restrictedPodSecurityContext() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{
+		RunAsNonRoot: seccompBoolPtr(true),
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+}
+
+func restrictedContainerSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: seccompBoolPtr(false),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{
+				"ALL",
+			},
+		},
+	}
+}
+
+func seccompBoolPtr(value bool) *bool {
+	return &value
+}
+
+func updateHighAvailabilityStatus(
+	cluster *databasev1.PostgreSQLCluster,
+	primaryPodName string,
+	primaryReady bool,
+) {
+	haSpec := cluster.Spec.HighAvailability
+
+	cluster.Status.HAEnabled = haSpec.Enabled
+
+	if !haSpec.Enabled {
+		cluster.Status.HAPhase = "Disabled"
+		cluster.Status.PrimaryPod = ""
+		cluster.Status.StandbyPods = nil
+		cluster.Status.FailoverPhase = "Disabled"
+		cluster.Status.FailoverReason = ""
+		cluster.Status.LastPrimaryFailureTime = nil
+		return
+	}
+
+	replicas := haSpec.Replicas
+	if replicas <= 0 {
+		replicas = 1
+	}
+
+	cluster.Status.PrimaryPod = primaryPodName
+	cluster.Status.StandbyPods = expectedStandbyPods(
+		cluster.Name,
+		replicas,
+	)
+
+	if primaryReady {
+		if replicas > 1 {
+			cluster.Status.HAPhase = "StandbyPlanned"
+		} else {
+			cluster.Status.HAPhase = "SinglePrimary"
+		}
+
+		cluster.Status.FailoverPhase = "Healthy"
+		cluster.Status.FailoverReason = ""
+		return
+	}
+
+	cluster.Status.HAPhase = "Degraded"
+	cluster.Status.FailoverPhase = "PrimaryUnavailable"
+
+	if cluster.Status.LastPrimaryFailureTime == nil {
+		now := metav1.Now()
+		cluster.Status.LastPrimaryFailureTime = &now
+	}
+
+	timeout := haSpec.DetectionTimeoutSeconds
+	if timeout <= 0 {
+		timeout = 60
+	}
+
+	mode := haSpec.FailoverMode
+	if mode == "" {
+		mode = "Manual"
+	}
+
+	cluster.Status.FailoverReason = fmt.Sprintf(
+		"primary pod %s is not ready; failover mode is %s; detection timeout is %d seconds",
+		primaryPodName,
+		mode,
+		timeout,
+	)
+}
+
+func expectedStandbyPods(
+	clusterName string,
+	replicas int32,
+) []string {
+	if replicas <= 1 {
+		return nil
+	}
+
+	standbyPods := make(
+		[]string,
+		0,
+		replicas-1,
+	)
+
+	for index := int32(1); index < replicas; index++ {
+		standbyPods = append(
+			standbyPods,
+			fmt.Sprintf(
+				"%s-%d",
+				clusterName,
+				index,
+			),
+		)
+	}
+
+	return standbyPods
+}
+
+func isPodReady(
+	pod *corev1.Pod,
+) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady &&
+			condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (r *PostgreSQLClusterReconciler) reconcileCredentialsSecret(
@@ -1075,8 +1221,9 @@ func (r *PostgreSQLClusterReconciler) buildStatefulSet(
 		initContainers = append(
 			initContainers,
 			corev1.Container{
-				Name:  "prepare-barman-ssh",
-				Image: image,
+				Name:            "prepare-barman-ssh",
+				SecurityContext: restrictedContainerSecurityContext(),
+				Image:           image,
 				Command: []string{
 					"/bin/sh",
 					"-ec",
@@ -1155,12 +1302,14 @@ chmod 755 /etc/barman-ssh/ssh
 					},
 				},
 				Spec: corev1.PodSpec{
-					InitContainers: initContainers,
+					SecurityContext: restrictedPodSecurityContext(),
+					InitContainers:  initContainers,
 					Containers: []corev1.Container{
 						{
-							Name:      "postgres",
-							Image:     image,
-							Lifecycle: buildStreamingRoleLifecycle(cluster),
+							Name:            "postgres",
+							SecurityContext: restrictedContainerSecurityContext(),
+							Image:           image,
+							Lifecycle:       buildStreamingRoleLifecycle(cluster),
 							Args: []string{
 								"-c",
 								"config_file=/etc/postgresql/custom.conf",
@@ -1798,23 +1947,6 @@ func restoreJobName(
 	return name
 }
 
-func isPodReady(
-	pod *corev1.Pod,
-) bool {
-	if pod.Status.Phase != corev1.PodRunning {
-		return false
-	}
-
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodReady &&
-			condition.Status == corev1.ConditionTrue {
-			return true
-		}
-	}
-
-	return false
-}
-
 func (r *PostgreSQLClusterReconciler) ensureStatefulSetReplicas(
 	ctx context.Context,
 	desiredStatefulSet *appsv1.StatefulSet,
@@ -2041,10 +2173,12 @@ echo "RESTORE_JOB_OK"
 					Labels: restoreLabels,
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					SecurityContext: restrictedPodSecurityContext(),
+					RestartPolicy:   corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
 							Name:            "restore",
+							SecurityContext: restrictedContainerSecurityContext(),
 							Image:           restoreImage,
 							ImagePullPolicy: corev1.PullAlways,
 							Command: []string{
@@ -2484,7 +2618,8 @@ echo "POST_RESTORE_STABILIZATION_JOB_OK"
 					Labels: stabilizationLabels,
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					SecurityContext: restrictedPodSecurityContext(),
+					RestartPolicy:   corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
 							Name:            "stabilize",
@@ -3424,9 +3559,11 @@ func (r *PostgreSQLClusterReconciler) buildPgBouncerDeployment(
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					SecurityContext: restrictedPodSecurityContext(),
 					Containers: []corev1.Container{
 						{
 							Name:            "pgbouncer",
+							SecurityContext: restrictedContainerSecurityContext(),
 							Image:           effectivePgBouncerImage(cluster),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
@@ -3783,10 +3920,12 @@ exit 1
 							Labels: cronJobLabels,
 						},
 						Spec: corev1.PodSpec{
-							RestartPolicy: corev1.RestartPolicyNever,
+							SecurityContext: restrictedPodSecurityContext(),
+							RestartPolicy:   corev1.RestartPolicyNever,
 							Containers: []corev1.Container{
 								{
 									Name:            "barman-backup",
+									SecurityContext: restrictedContainerSecurityContext(),
 									Image:           backupImage,
 									ImagePullPolicy: corev1.PullAlways,
 									Command: []string{

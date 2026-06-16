@@ -41,5 +41,11 @@ spec:
     maxClientConn: 100
     defaultPoolSize: 20
 
+  highAvailability:
+    enabled: true
+    replicas: 2
+    failoverMode: Manual
+    detectionTimeoutSeconds: 60
+
   restore:
     enabled: false

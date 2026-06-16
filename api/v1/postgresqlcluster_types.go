@@ -134,6 +134,27 @@ type PgBouncerSpec struct {
 	DefaultPoolSize int32 `json:"defaultPoolSize,omitempty"`
 }
 
+// HighAvailabilitySpec defines the optional HA and failover-readiness configuration.
+// This phase prepares the operator for a primary/standby architecture without
+// performing unsafe automatic promotion by default.
+type HighAvailabilitySpec struct {
+	// Enabled indicates whether HA readiness mode is enabled.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Replicas is the desired PostgreSQL topology size.
+	// A value of 1 means single primary.
+	// A value of 2 or more represents a primary plus standby-ready architecture.
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// FailoverMode defines how failover should be handled.
+	// Supported initial values: Disabled, Manual, SemiAutomatic.
+	FailoverMode string `json:"failoverMode,omitempty"`
+
+	// DetectionTimeoutSeconds defines how long the operator should tolerate
+	// an unhealthy primary before reporting failover as required.
+	DetectionTimeoutSeconds int32 `json:"detectionTimeoutSeconds,omitempty"`
+}
+
 // PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
 type PostgreSQLClusterSpec struct {
 	PostgresVersion string `json:"postgresVersion,omitempty"`
@@ -165,6 +186,9 @@ type PostgreSQLClusterSpec struct {
 
 	// PgBouncer defines the optional connection pooler configuration.
 	PgBouncer PgBouncerSpec `json:"pgbouncer,omitempty"`
+
+	// HighAvailability defines optional HA readiness and failover detection settings.
+	HighAvailability HighAvailabilitySpec `json:"highAvailability,omitempty"`
 }
 
 // PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
@@ -230,6 +254,29 @@ type PostgreSQLClusterStatus struct {
 
 	// PgBouncerService is the generated Service used by applications to connect through PgBouncer.
 	PgBouncerService string `json:"pgbouncerService,omitempty"`
+
+	// HAEnabled indicates whether high availability readiness is enabled.
+	HAEnabled bool `json:"haEnabled,omitempty"`
+
+	// HAPhase describes the current HA topology state.
+	// Example values: Disabled, SinglePrimary, StandbyPlanned, Ready, Degraded.
+	HAPhase string `json:"haPhase,omitempty"`
+
+	// PrimaryPod is the current PostgreSQL primary pod observed by the operator.
+	PrimaryPod string `json:"primaryPod,omitempty"`
+
+	// StandbyPods lists standby pod names expected or observed by the operator.
+	StandbyPods []string `json:"standbyPods,omitempty"`
+
+	// FailoverPhase describes the current failover-readiness state.
+	// Example values: Disabled, Healthy, PrimaryUnavailable, RecoveryRequired.
+	FailoverPhase string `json:"failoverPhase,omitempty"`
+
+	// FailoverReason provides a human-readable explanation of the latest failover state.
+	FailoverReason string `json:"failoverReason,omitempty"`
+
+	// LastPrimaryFailureTime records when the operator last detected primary unavailability.
+	LastPrimaryFailureTime *metav1.Time `json:"lastPrimaryFailureTime,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -240,6 +287,8 @@ type PostgreSQLClusterStatus struct {
 // +kubebuilder:printcolumn:name="Backup",type=boolean,JSONPath=`.status.backupEnabled`
 // +kubebuilder:printcolumn:name="Restore",type=string,JSONPath=`.status.restorePhase`
 // +kubebuilder:printcolumn:name="PgBouncer",type=string,JSONPath=`.status.pgbouncerPhase`
+// +kubebuilder:printcolumn:name="HA",type=string,JSONPath=`.status.haPhase`
+// +kubebuilder:printcolumn:name="Failover",type=string,JSONPath=`.status.failoverPhase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // PostgreSQLCluster is the Schema for the postgresqlclusters API.

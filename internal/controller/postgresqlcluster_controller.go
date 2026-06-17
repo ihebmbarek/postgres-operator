@@ -634,6 +634,17 @@ func updateHighAvailabilityStatus(
 
 	cluster.Status.HAEnabled = haSpec.Enabled
 
+	if cluster.Status.FailoverPhase == "Promoted" ||
+		cluster.Status.HAPhase == "FailoverPromoted" {
+		cluster.Status.HAPhase = "FailoverPromoted"
+		cluster.Status.FailoverPhase = "Promoted"
+		cluster.Status.PrimaryPod = primaryPodName
+		cluster.Status.StandbyPods = []string{
+			cluster.Name + "-standby-0",
+		}
+		return
+	}
+
 	if !haSpec.Enabled {
 		cluster.Status.HAPhase = "Disabled"
 		cluster.Status.PrimaryPod = ""
@@ -1900,6 +1911,11 @@ func (r *PostgreSQLClusterReconciler) shouldSkipPrimaryReconcileForAutomaticFail
 
 	if !automaticFailoverMode(cluster) {
 		return false, nil
+	}
+
+	if cluster.Status.FailoverPhase == "Promoted" ||
+		cluster.Status.HAPhase == "FailoverPromoted" {
+		return true, nil
 	}
 
 	var primaryStatefulSet appsv1.StatefulSet

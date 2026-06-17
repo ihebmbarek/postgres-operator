@@ -267,9 +267,42 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		)
 	}
 
-	if err := r.reconcileStatefulSet(
+	skipPrimaryReconcile, skipErr := r.shouldSkipPrimaryReconcileForAutomaticFailover(
 		ctx,
-		statefulSet,
+		&cluster,
+	)
+	if skipErr != nil {
+		return ctrl.Result{}, skipErr
+	}
+
+	if !skipPrimaryReconcile {
+		if err := r.reconcileStatefulSet(
+			ctx,
+			statefulSet,
+		); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		log.Info(
+			"Skipping primary StatefulSet reconciliation during automatic failover fencing",
+			"name",
+			statefulSet.Name,
+		)
+	}
+
+	if err := r.reconcileStandbyStatefulSet(
+		ctx,
+		&cluster,
+		labels,
+		image,
+		database,
+		user,
+		storageSize,
+		storageClassName,
+		cpuRequest,
+		cpuLimit,
+		memoryRequest,
+		memoryLimit,
 	); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -310,6 +343,15 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		podName,
 		primaryReady,
 	)
+
+	automaticFailoverRequeueAfter, err := r.reconcileAutomaticFailover(
+		ctx,
+		&cluster,
+		primaryReady,
+	)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
 	if cluster.Spec.Backup.Enabled {
 		cluster.Status.BackupEnabled = true
@@ -383,6 +425,12 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 
 			return ctrl.Result{}, err
 		}
+	}
+
+	if automaticFailoverRequeueAfter > 0 {
+		return ctrl.Result{
+			RequeueAfter: automaticFailoverRequeueAfter,
+		}, nil
 	}
 
 	if cluster.Spec.Backup.Enabled {
@@ -586,6 +634,17 @@ func updateHighAvailabilityStatus(
 
 	cluster.Status.HAEnabled = haSpec.Enabled
 
+	if cluster.Status.FailoverPhase == "Promoted" ||
+		cluster.Status.HAPhase == "FailoverPromoted" {
+		cluster.Status.HAPhase = "FailoverPromoted"
+		cluster.Status.FailoverPhase = "Promoted"
+		cluster.Status.PrimaryPod = primaryPodName
+		cluster.Status.StandbyPods = []string{
+			cluster.Name + "-standby-0",
+		}
+		return
+	}
+
 	if !haSpec.Enabled {
 		cluster.Status.HAPhase = "Disabled"
 		cluster.Status.PrimaryPod = ""
@@ -616,6 +675,7 @@ func updateHighAvailabilityStatus(
 
 		cluster.Status.FailoverPhase = "Healthy"
 		cluster.Status.FailoverReason = ""
+		cluster.Status.LastPrimaryFailureTime = nil
 		return
 	}
 
@@ -653,24 +713,9 @@ func expectedStandbyPods(
 		return nil
 	}
 
-	standbyPods := make(
-		[]string,
-		0,
-		replicas-1,
-	)
-
-	for index := int32(1); index < replicas; index++ {
-		standbyPods = append(
-			standbyPods,
-			fmt.Sprintf(
-				"%s-%d",
-				clusterName,
-				index,
-			),
-		)
+	return []string{
+		clusterName + "-standby-0",
 	}
-
-	return standbyPods
 }
 
 func isPodReady(
@@ -1268,6 +1313,13 @@ func (r *PostgreSQLClusterReconciler) buildService(
 	cluster *databasev1.PostgreSQLCluster,
 	labels map[string]string,
 ) *corev1.Service {
+	selector := postgresComponentLabels(labels)
+
+	if cluster.Status.FailoverPhase == "Promoted" ||
+		cluster.Status.HAPhase == "FailoverPromoted" {
+		selector = standbyComponentLabels(labels)
+	}
+
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cluster.Name,
@@ -1276,7 +1328,7 @@ func (r *PostgreSQLClusterReconciler) buildService(
 		},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: "None",
-			Selector:  postgresComponentLabels(labels),
+			Selector:  selector,
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "postgres",
@@ -1627,6 +1679,626 @@ chmod 755 /etc/barman-ssh/ssh
 			},
 		},
 	}
+}
+
+func standbyStatefulSetName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return cluster.Name + "-standby"
+}
+
+func standbyPodName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return standbyStatefulSetName(cluster) + "-0"
+}
+
+func standbyComponentLabels(
+	labels map[string]string,
+) map[string]string {
+	standbyLabels := copyStringMap(labels)
+	standbyLabels["app.kubernetes.io/component"] = "postgres-standby"
+	standbyLabels["database.iheb.local/role"] = "standby"
+	return standbyLabels
+}
+
+func shouldCreateStandby(
+	cluster *databasev1.PostgreSQLCluster,
+) bool {
+	return cluster.Spec.HighAvailability.Enabled &&
+		cluster.Spec.HighAvailability.Replicas > 1 &&
+		cluster.Spec.Backup.Enabled
+}
+
+func buildStandbyCommand(
+	cluster *databasev1.PostgreSQLCluster,
+) []string {
+	return []string{
+		"/bin/sh",
+		"-ec",
+		fmt.Sprintf(
+			`
+echo "Starting PG Guardian standby bootstrap"
+
+PRIMARY_HOST="%s"
+PRIMARY_PORT="5432"
+
+if [ -z "${STREAMING_USER:-}" ] || [ -z "${STREAMING_PASSWORD:-}" ]; then
+  echo "STREAMING_USER or STREAMING_PASSWORD is missing" >&2
+  exit 1
+fi
+
+export PGPASSWORD="${STREAMING_PASSWORD}"
+
+attempt=1
+while [ "${attempt}" -le 60 ]; do
+  if pg_isready \
+    -h "${PRIMARY_HOST}" \
+    -p "${PRIMARY_PORT}" \
+    -U "${STREAMING_USER}" \
+    -d postgres \
+    >/dev/null 2>&1
+  then
+    echo "Primary is reachable"
+    break
+  fi
+
+  echo "Waiting for primary ${PRIMARY_HOST}:${PRIMARY_PORT} (${attempt}/60)"
+  attempt=$((attempt + 1))
+  sleep 5
+done
+
+if [ "${attempt}" -gt 60 ]; then
+  echo "Primary did not become reachable" >&2
+  exit 1
+fi
+
+if [ ! -s "${PGDATA}/PG_VERSION" ]; then
+  echo "Initializing standby with pg_basebackup"
+  rm -rf "${PGDATA:?}/"*
+
+  pg_basebackup \
+    -h "${PRIMARY_HOST}" \
+    -p "${PRIMARY_PORT}" \
+    -U "${STREAMING_USER}" \
+    -D "${PGDATA}" \
+    -Fp \
+    -Xs \
+    -P \
+    -R
+
+  echo "Standby base backup completed"
+else
+  echo "Existing standby data directory detected"
+fi
+
+echo "Starting PostgreSQL standby"
+exec postgres -c config_file=/etc/postgresql/custom.conf
+`,
+			cluster.Name,
+		),
+	}
+}
+
+func (r *PostgreSQLClusterReconciler) buildStandbyStatefulSet(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	image string,
+	database string,
+	user string,
+	storageSize string,
+	storageClassName string,
+	cpuRequest string,
+	cpuLimit string,
+	memoryRequest string,
+	memoryLimit string,
+) *appsv1.StatefulSet {
+	standbyLabels := standbyComponentLabels(labels)
+
+	statefulSet := r.buildStatefulSet(
+		cluster,
+		labels,
+		image,
+		database,
+		user,
+		storageSize,
+		storageClassName,
+		cpuRequest,
+		cpuLimit,
+		memoryRequest,
+		memoryLimit,
+	)
+
+	statefulSet.Name = standbyStatefulSetName(cluster)
+	statefulSet.Labels = standbyLabels
+	statefulSet.Spec.ServiceName = cluster.Name
+	statefulSet.Spec.Selector.MatchLabels = standbyLabels
+	statefulSet.Spec.Template.Labels = standbyLabels
+
+	if len(statefulSet.Spec.Template.Spec.Containers) > 0 {
+		container := &statefulSet.Spec.Template.Spec.Containers[0]
+		container.Lifecycle = nil
+		container.Command = buildStandbyCommand(cluster)
+		container.Args = nil
+	}
+
+	return statefulSet
+}
+
+func (r *PostgreSQLClusterReconciler) reconcileStandbyStatefulSet(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	image string,
+	database string,
+	user string,
+	storageSize string,
+	storageClassName string,
+	cpuRequest string,
+	cpuLimit string,
+	memoryRequest string,
+	memoryLimit string,
+) error {
+	log := logf.FromContext(ctx)
+	standbyName := standbyStatefulSetName(cluster)
+
+	if !shouldCreateStandby(cluster) {
+		var existingStandby appsv1.StatefulSet
+		err := r.Get(
+			ctx,
+			client.ObjectKey{
+				Name:      standbyName,
+				Namespace: cluster.Namespace,
+			},
+			&existingStandby,
+		)
+
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+
+		if err != nil {
+			return err
+		}
+
+		log.Info(
+			"Deleting PostgreSQL standby StatefulSet",
+			"name",
+			standbyName,
+		)
+
+		return r.Delete(
+			ctx,
+			&existingStandby,
+		)
+	}
+
+	standbyStatefulSet := r.buildStandbyStatefulSet(
+		cluster,
+		labels,
+		image,
+		database,
+		user,
+		storageSize,
+		storageClassName,
+		cpuRequest,
+		cpuLimit,
+		memoryRequest,
+		memoryLimit,
+	)
+
+	if err := ctrl.SetControllerReference(
+		cluster,
+		standbyStatefulSet,
+		r.Scheme,
+	); err != nil {
+		return err
+	}
+
+	return r.reconcileStatefulSet(
+		ctx,
+		standbyStatefulSet,
+	)
+}
+
+func (r *PostgreSQLClusterReconciler) shouldSkipPrimaryReconcileForAutomaticFailover(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+) (bool, error) {
+	if !cluster.Spec.HighAvailability.Enabled {
+		return false, nil
+	}
+
+	if !automaticFailoverMode(cluster) {
+		return false, nil
+	}
+
+	if cluster.Status.FailoverPhase == "Promoted" ||
+		cluster.Status.HAPhase == "FailoverPromoted" {
+		return true, nil
+	}
+
+	var primaryStatefulSet appsv1.StatefulSet
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      cluster.Name,
+			Namespace: cluster.Namespace,
+		},
+		&primaryStatefulSet,
+	)
+
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	if primaryStatefulSet.Spec.Replicas == nil ||
+		*primaryStatefulSet.Spec.Replicas != 0 {
+		return false, nil
+	}
+
+	var standbyPod corev1.Pod
+	err = r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      standbyPodName(cluster),
+			Namespace: cluster.Namespace,
+		},
+		&standbyPod,
+	)
+
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return isPodReady(&standbyPod), nil
+}
+
+func promotionJobName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return cluster.Name + "-promote-standby"
+}
+
+func automaticFailoverMode(
+	cluster *databasev1.PostgreSQLCluster,
+) bool {
+	return strings.EqualFold(
+		cluster.Spec.HighAvailability.FailoverMode,
+		"Automatic",
+	)
+}
+
+func failoverDetectionTimeout(
+	cluster *databasev1.PostgreSQLCluster,
+) time.Duration {
+	timeout := cluster.Spec.HighAvailability.DetectionTimeoutSeconds
+	if timeout <= 0 {
+		timeout = 60
+	}
+
+	return time.Duration(timeout) * time.Second
+}
+
+func (r *PostgreSQLClusterReconciler) reconcileAutomaticFailover(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	primaryReady bool,
+) (time.Duration, error) {
+	log := logf.FromContext(ctx)
+
+	if !cluster.Spec.HighAvailability.Enabled {
+		return 0, nil
+	}
+
+	if !automaticFailoverMode(cluster) {
+		return 0, nil
+	}
+
+	if primaryReady {
+		return 0, nil
+	}
+
+	standbyName := standbyPodName(cluster)
+
+	var standbyPod corev1.Pod
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      standbyName,
+			Namespace: cluster.Namespace,
+		},
+		&standbyPod,
+	)
+	if apierrors.IsNotFound(err) {
+		cluster.Status.FailoverPhase = "StandbyUnavailable"
+		cluster.Status.FailoverReason = fmt.Sprintf(
+			"automatic failover is blocked because standby pod %s does not exist",
+			standbyName,
+		)
+		return 10 * time.Second, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	if !isPodReady(&standbyPod) {
+		cluster.Status.FailoverPhase = "StandbyNotReady"
+		cluster.Status.FailoverReason = fmt.Sprintf(
+			"automatic failover is waiting because standby pod %s is not ready",
+			standbyName,
+		)
+		return 10 * time.Second, nil
+	}
+
+	if cluster.Status.LastPrimaryFailureTime == nil {
+		now := metav1.Now()
+		cluster.Status.LastPrimaryFailureTime = &now
+		cluster.Status.FailoverPhase = "PromotionPending"
+		cluster.Status.FailoverReason = "automatic failover detected primary outage and started detection timeout"
+		return 10 * time.Second, nil
+	}
+
+	timeout := failoverDetectionTimeout(cluster)
+	elapsed := time.Since(
+		cluster.Status.LastPrimaryFailureTime.Time,
+	)
+
+	if elapsed < timeout {
+		remaining := timeout - elapsed
+		cluster.Status.FailoverPhase = "PromotionPending"
+		cluster.Status.FailoverReason = fmt.Sprintf(
+			"automatic failover is waiting for detection timeout; remaining %s",
+			remaining.Round(time.Second),
+		)
+
+		if remaining < 10*time.Second {
+			return remaining, nil
+		}
+
+		return 10 * time.Second, nil
+	}
+
+	promotionJobComplete, promotionJobFailed, err := r.reconcilePromotionJob(
+		ctx,
+		cluster,
+		&standbyPod,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	if promotionJobComplete {
+		cluster.Status.HAPhase = "FailoverPromoted"
+		cluster.Status.FailoverPhase = "Promoted"
+		cluster.Status.FailoverReason = fmt.Sprintf(
+			"standby pod %s was promoted automatically after primary pod %s became unavailable",
+			standbyName,
+			cluster.Status.PrimaryPod,
+		)
+		return 0, nil
+	}
+
+	if promotionJobFailed {
+		cluster.Status.FailoverPhase = "PromotionFailed"
+		cluster.Status.FailoverReason = fmt.Sprintf(
+			"automatic promotion job %s failed",
+			promotionJobName(cluster),
+		)
+		return 30 * time.Second, nil
+	}
+
+	log.Info(
+		"Automatic failover promotion is in progress",
+		"standbyPod",
+		standbyName,
+		"promotionJob",
+		promotionJobName(cluster),
+	)
+
+	cluster.Status.FailoverPhase = "Promoting"
+	cluster.Status.FailoverReason = fmt.Sprintf(
+		"automatic promotion job %s is running for standby pod %s",
+		promotionJobName(cluster),
+		standbyName,
+	)
+
+	return 10 * time.Second, nil
+}
+
+func (r *PostgreSQLClusterReconciler) reconcilePromotionJob(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	standbyPod *corev1.Pod,
+) (bool, bool, error) {
+	log := logf.FromContext(ctx)
+	jobName := promotionJobName(cluster)
+
+	var existingJob batchv1.Job
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      jobName,
+			Namespace: cluster.Namespace,
+		},
+		&existingJob,
+	)
+
+	if err == nil {
+		return isPromotionJobComplete(&existingJob),
+			isPromotionJobFailed(&existingJob),
+			nil
+	}
+
+	if !apierrors.IsNotFound(err) {
+		return false, false, err
+	}
+
+	if standbyPod.Status.PodIP == "" {
+		return false, false, fmt.Errorf(
+			"standby pod %s has no pod IP",
+			standbyPod.Name,
+		)
+	}
+
+	job := r.buildPromotionJob(
+		cluster,
+		standbyPod.Status.PodIP,
+	)
+
+	if err := ctrl.SetControllerReference(
+		cluster,
+		job,
+		r.Scheme,
+	); err != nil {
+		return false, false, err
+	}
+
+	log.Info(
+		"Creating automatic failover promotion Job",
+		"name",
+		job.Name,
+		"standbyPod",
+		standbyPod.Name,
+		"standbyPodIP",
+		standbyPod.Status.PodIP,
+	)
+
+	if err := r.Create(
+		ctx,
+		job,
+	); err != nil {
+		return false, false, err
+	}
+
+	return false, false, nil
+}
+
+func (r *PostgreSQLClusterReconciler) buildPromotionJob(
+	cluster *databasev1.PostgreSQLCluster,
+	standbyPodIP string,
+) *batchv1.Job {
+	backoffLimit := int32(1)
+	ttlSecondsAfterFinished := int32(3600)
+
+	labels := map[string]string{
+		"app":                         cluster.Name,
+		"managed":                     "postgres-operator",
+		"app.kubernetes.io/component": "failover-promotion",
+		"database.iheb.local/role":    "promotion-job",
+		"database.iheb.local/cluster": cluster.Name,
+	}
+
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      promotionJobName(cluster),
+			Namespace: cluster.Namespace,
+			Labels:    labels,
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: &ttlSecondsAfterFinished,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy:   corev1.RestartPolicyNever,
+					SecurityContext: restrictedPodSecurityContext(),
+					Containers: []corev1.Container{
+						{
+							Name:            "promote-standby",
+							Image:           cluster.Spec.Image,
+							SecurityContext: restrictedContainerSecurityContext(),
+							Command: []string{
+								"/bin/sh",
+								"-ec",
+							},
+							Args: []string{
+								fmt.Sprintf(
+									`
+echo "Promoting PostgreSQL standby at %s"
+
+export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+psql \
+  -h "%s" \
+  -p 5432 \
+  -U "${POSTGRES_USER}" \
+  -d postgres \
+  -v ON_ERROR_STOP=1 \
+  -c "SELECT pg_promote(true, 60);"
+
+echo "PostgreSQL standby promotion command completed"
+`,
+									standbyPodIP,
+									standbyPodIP,
+								),
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "POSTGRES_USER",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: cluster.Name + "-credentials",
+											},
+											Key: "POSTGRES_USER",
+										},
+									},
+								},
+								{
+									Name: "POSTGRES_PASSWORD",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: cluster.Name + "-credentials",
+											},
+											Key: "POSTGRES_PASSWORD",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func isPromotionJobComplete(
+	job *batchv1.Job,
+) bool {
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobComplete &&
+			condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isPromotionJobFailed(
+	job *batchv1.Job,
+) bool {
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobFailed &&
+			condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
 }
 
 func buildStreamingRoleLifecycle(

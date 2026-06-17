@@ -33,6 +33,12 @@ metadata:
             "cpuLimit": "500m",
             "cpuRequest": "250m",
             "database": "appdb",
+            "highAvailability": {
+              "detectionTimeoutSeconds": 60,
+              "enabled": true,
+              "failoverMode": "Manual",
+              "replicas": 2
+            },
             "image": "quay.io/iheb_mbarek/postgres-barman:latest",
             "memoryLimit": "512Mi",
             "memoryRequest": "256Mi",
@@ -55,10 +61,11 @@ metadata:
         }
       ]
     capabilities: Basic Install
-    createdAt: "2026-06-15T15:33:58Z"
+    createdAt: "2026-06-16T18:49:51Z"
     operators.operatorframework.io/builder: operator-sdk-v1.40.0
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
-  name: postgres-operator.v0.2.3
+  name: postgres-operator.v0.2.5
+  replaces: postgres-operator.v0.2.4
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -197,7 +204,7 @@ spec:
                 - --health-probe-bind-address=:8081
                 command:
                 - /manager
-                image: quay.io/iheb_mbarek/postgres-operator:v0.2.3
+                image: quay.io/iheb_mbarek/postgres-operator:v0.2.5
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -293,4 +300,4 @@ spec:
   provider:
     name: Iheb Mbarek
     url: https://github.com/ihebmbarek/postgres-operator
-  version: 0.2.3
+  version: 0.2.5

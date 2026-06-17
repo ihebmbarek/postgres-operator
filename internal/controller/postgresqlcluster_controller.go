@@ -274,6 +274,23 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		return ctrl.Result{}, err
 	}
 
+	if err := r.reconcileStandbyStatefulSet(
+		ctx,
+		&cluster,
+		labels,
+		image,
+		database,
+		user,
+		storageSize,
+		storageClassName,
+		cpuRequest,
+		cpuLimit,
+		memoryRequest,
+		memoryLimit,
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	podName := cluster.Name + "-0"
 
 	var postgresPod corev1.Pod
@@ -653,24 +670,9 @@ func expectedStandbyPods(
 		return nil
 	}
 
-	standbyPods := make(
-		[]string,
-		0,
-		replicas-1,
-	)
-
-	for index := int32(1); index < replicas; index++ {
-		standbyPods = append(
-			standbyPods,
-			fmt.Sprintf(
-				"%s-%d",
-				clusterName,
-				index,
-			),
-		)
+	return []string{
+		clusterName + "-standby-0",
 	}
-
-	return standbyPods
 }
 
 func isPodReady(
@@ -1627,6 +1629,226 @@ chmod 755 /etc/barman-ssh/ssh
 			},
 		},
 	}
+}
+
+func standbyStatefulSetName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return cluster.Name + "-standby"
+}
+
+func standbyPodName(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	return standbyStatefulSetName(cluster) + "-0"
+}
+
+func standbyComponentLabels(
+	labels map[string]string,
+) map[string]string {
+	standbyLabels := copyStringMap(labels)
+	standbyLabels["app.kubernetes.io/component"] = "postgres-standby"
+	standbyLabels["database.iheb.local/role"] = "standby"
+	return standbyLabels
+}
+
+func shouldCreateStandby(
+	cluster *databasev1.PostgreSQLCluster,
+) bool {
+	return cluster.Spec.HighAvailability.Enabled &&
+		cluster.Spec.HighAvailability.Replicas > 1 &&
+		cluster.Spec.Backup.Enabled
+}
+
+func buildStandbyCommand(
+	cluster *databasev1.PostgreSQLCluster,
+) []string {
+	return []string{
+		"/bin/sh",
+		"-ec",
+		fmt.Sprintf(
+			`
+echo "Starting PG Guardian standby bootstrap"
+
+PRIMARY_HOST="%s"
+PRIMARY_PORT="5432"
+
+if [ -z "${STREAMING_USER:-}" ] || [ -z "${STREAMING_PASSWORD:-}" ]; then
+  echo "STREAMING_USER or STREAMING_PASSWORD is missing" >&2
+  exit 1
+fi
+
+export PGPASSWORD="${STREAMING_PASSWORD}"
+
+attempt=1
+while [ "${attempt}" -le 60 ]; do
+  if pg_isready \
+    -h "${PRIMARY_HOST}" \
+    -p "${PRIMARY_PORT}" \
+    -U "${STREAMING_USER}" \
+    -d postgres \
+    >/dev/null 2>&1
+  then
+    echo "Primary is reachable"
+    break
+  fi
+
+  echo "Waiting for primary ${PRIMARY_HOST}:${PRIMARY_PORT} (${attempt}/60)"
+  attempt=$((attempt + 1))
+  sleep 5
+done
+
+if [ "${attempt}" -gt 60 ]; then
+  echo "Primary did not become reachable" >&2
+  exit 1
+fi
+
+if [ ! -s "${PGDATA}/PG_VERSION" ]; then
+  echo "Initializing standby with pg_basebackup"
+  rm -rf "${PGDATA:?}/"*
+
+  pg_basebackup \
+    -h "${PRIMARY_HOST}" \
+    -p "${PRIMARY_PORT}" \
+    -U "${STREAMING_USER}" \
+    -D "${PGDATA}" \
+    -Fp \
+    -Xs \
+    -P \
+    -R
+
+  echo "Standby base backup completed"
+else
+  echo "Existing standby data directory detected"
+fi
+
+echo "Starting PostgreSQL standby"
+exec postgres -c config_file=/etc/postgresql/custom.conf
+`,
+			cluster.Name,
+		),
+	}
+}
+
+func (r *PostgreSQLClusterReconciler) buildStandbyStatefulSet(
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	image string,
+	database string,
+	user string,
+	storageSize string,
+	storageClassName string,
+	cpuRequest string,
+	cpuLimit string,
+	memoryRequest string,
+	memoryLimit string,
+) *appsv1.StatefulSet {
+	standbyLabels := standbyComponentLabels(labels)
+
+	statefulSet := r.buildStatefulSet(
+		cluster,
+		labels,
+		image,
+		database,
+		user,
+		storageSize,
+		storageClassName,
+		cpuRequest,
+		cpuLimit,
+		memoryRequest,
+		memoryLimit,
+	)
+
+	statefulSet.Name = standbyStatefulSetName(cluster)
+	statefulSet.Labels = standbyLabels
+	statefulSet.Spec.ServiceName = cluster.Name
+	statefulSet.Spec.Selector.MatchLabels = standbyLabels
+	statefulSet.Spec.Template.Labels = standbyLabels
+
+	if len(statefulSet.Spec.Template.Spec.Containers) > 0 {
+		container := &statefulSet.Spec.Template.Spec.Containers[0]
+		container.Lifecycle = nil
+		container.Command = buildStandbyCommand(cluster)
+		container.Args = nil
+	}
+
+	return statefulSet
+}
+
+func (r *PostgreSQLClusterReconciler) reconcileStandbyStatefulSet(
+	ctx context.Context,
+	cluster *databasev1.PostgreSQLCluster,
+	labels map[string]string,
+	image string,
+	database string,
+	user string,
+	storageSize string,
+	storageClassName string,
+	cpuRequest string,
+	cpuLimit string,
+	memoryRequest string,
+	memoryLimit string,
+) error {
+	log := logf.FromContext(ctx)
+	standbyName := standbyStatefulSetName(cluster)
+
+	if !shouldCreateStandby(cluster) {
+		var existingStandby appsv1.StatefulSet
+		err := r.Get(
+			ctx,
+			client.ObjectKey{
+				Name:      standbyName,
+				Namespace: cluster.Namespace,
+			},
+			&existingStandby,
+		)
+
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+
+		if err != nil {
+			return err
+		}
+
+		log.Info(
+			"Deleting PostgreSQL standby StatefulSet",
+			"name",
+			standbyName,
+		)
+
+		return r.Delete(
+			ctx,
+			&existingStandby,
+		)
+	}
+
+	standbyStatefulSet := r.buildStandbyStatefulSet(
+		cluster,
+		labels,
+		image,
+		database,
+		user,
+		storageSize,
+		storageClassName,
+		cpuRequest,
+		cpuLimit,
+		memoryRequest,
+		memoryLimit,
+	)
+
+	if err := ctrl.SetControllerReference(
+		cluster,
+		standbyStatefulSet,
+		r.Scheme,
+	); err != nil {
+		return err
+	}
+
+	return r.reconcileStatefulSet(
+		ctx,
+		standbyStatefulSet,
+	)
 }
 
 func buildStreamingRoleLifecycle(

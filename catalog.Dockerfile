@@ -1,4 +1,6 @@
 FROM quay.io/operator-framework/opm:latest
+
 COPY catalog /configs
+
 ENTRYPOINT ["/bin/opm"]
-CMD ["serve", "/configs"]
+CMD ["serve", "/configs", "--cache-dir=/tmp/cache"]

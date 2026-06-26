@@ -1,0 +1,187 @@
+apiVersion: packages.operators.coreos.com/v1
+kind: PackageManifest
+metadata:
+  creationTimestamp: "2026-06-12T16:27:50Z"
+  labels:
+    catalog: pg-guardian-catalog
+    catalog-namespace: openshift-marketplace
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/os.linux: supported
+    provider: Iheb Mbarek
+    provider-url: https://github.com/ihebmbarek/postgres-operator
+  name: postgres-operator
+  namespace: openshift-marketplace
+spec: {}
+status:
+  catalogSource: pg-guardian-catalog
+  catalogSourceDisplayName: PG Guardian Catalog
+  catalogSourceNamespace: openshift-marketplace
+  catalogSourcePublisher: Iheb Mbarek
+  channels:
+  - currentCSV: postgres-operator.v0.3.4
+    currentCSVDesc:
+      annotations:
+        alm-examples: |-
+          [
+            {
+              "apiVersion": "database.iheb.local/v1",
+              "kind": "PostgreSQLBackup",
+              "metadata": {
+                "labels": {
+                  "app.kubernetes.io/managed-by": "kustomize",
+                  "app.kubernetes.io/name": "postgres-operator"
+                },
+                "name": "postgresqlbackup-sample"
+              },
+              "spec": null
+            },
+            {
+              "apiVersion": "database.iheb.local/v1",
+              "kind": "PostgreSQLCluster",
+              "metadata": {
+                "labels": {
+                  "app.kubernetes.io/managed-by": "kustomize",
+                  "app.kubernetes.io/name": "postgres-operator"
+                },
+                "name": "sample-postgres"
+              },
+              "spec": {
+                "backup": {
+                  "archiveTimeout": 60,
+                  "backupImage": "quay.io/iheb_mbarek/postgres-barman:latest",
+                  "barmanHost": "192.168.180.54",
+                  "barmanServerName": "sample-postgres",
+                  "barmanUser": "barman",
+                  "enabled": true,
+                  "exposeService": true,
+                  "nodePort": 30433,
+                  "replicationAllowedCIDR": "192.168.180.54/32",
+                  "schedule": "0 2 * * *",
+                  "sshSecretName": "barman-ssh-key",
+                  "streamingUser": "streaming_barman",
+                  "suspendScheduledBackups": false
+                },
+                "cpuLimit": "500m",
+                "cpuRequest": "250m",
+                "database": "appdb",
+                "highAvailability": {
+                  "detectionTimeoutSeconds": 60,
+                  "enabled": true,
+                  "failoverMode": "Manual",
+                  "replicas": 2
+                },
+                "image": "quay.io/iheb_mbarek/postgres-barman:latest",
+                "memoryLimit": "512Mi",
+                "memoryRequest": "256Mi",
+                "pgbouncer": {
+                  "defaultPoolSize": 20,
+                  "enabled": true,
+                  "image": "docker.io/edoburu/pgbouncer:latest",
+                  "maxClientConn": 100,
+                  "poolMode": "transaction",
+                  "replicas": 1
+                },
+                "postgresVersion": "16",
+                "restore": {
+                  "enabled": false
+                },
+                "storageClassName": "nfs-client",
+                "storageSize": "5Gi",
+                "tls": {
+                  "enabled": true,
+                  "requireClientCert": false,
+                  "secretName": "demo-postgres-tls",
+                  "sslMode": "require"
+                },
+                "user": "appuser"
+              }
+            },
+            {
+              "apiVersion": "database.iheb.local/v1",
+              "kind": "PostgreSQLRestore",
+              "metadata": {
+                "labels": {
+                  "app.kubernetes.io/managed-by": "kustomize",
+                  "app.kubernetes.io/name": "postgres-operator"
+                },
+                "name": "postgresqlrestore-sample"
+              },
+              "spec": null
+            }
+          ]
+        capabilities: Basic Install
+        createdAt: "2026-06-26T15:46:39Z"
+        operators.operatorframework.io/builder: operator-sdk-v1.40.0
+        operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+      apiservicedefinitions: {}
+      customresourcedefinitions:
+        owned:
+        - description: PostgreSQLBackup is the Schema for the postgresqlbackups API
+          displayName: Postgre SQLBackup
+          kind: PostgreSQLBackup
+          name: postgresqlbackups.database.iheb.local
+          version: v1
+        - description: PostgreSQLCluster is the Schema for the postgresqlclusters
+            API.
+          displayName: Postgre SQLCluster
+          kind: PostgreSQLCluster
+          name: postgresqlclusters.database.iheb.local
+          version: v1
+        - description: PostgreSQLRestore is the Schema for the postgresqlrestores
+            API
+          displayName: Postgre SQLRestore
+          kind: PostgreSQLRestore
+          name: postgresqlrestores.database.iheb.local
+          version: v1
+      description: PG Guardian is a PostgreSQL Operator for OpenShift that automates
+        PostgreSQL deployment, persistent storage, Barman backup integration, scheduled
+        backups, Point-in-Time Recovery, PgBouncer connection pooling, and OpenShift
+        monitoring and alerting.
+      displayName: PG Guardian operator
+      installModes:
+      - supported: false
+        type: OwnNamespace
+      - supported: false
+        type: SingleNamespace
+      - supported: false
+        type: MultiNamespace
+      - supported: true
+        type: AllNamespaces
+      keywords:
+      - postgresql
+      - operator
+      - openshift
+      - kubernetes
+      - database
+      - backup
+      - recovery
+      - pitr
+      - barman
+      - pgbouncer
+      - monitoring
+      - prometheus
+      links:
+      - name: Postgres Operator
+        url: https://postgres-operator.domain
+      maturity: alpha
+      provider:
+        name: Iheb Mbarek
+        url: https://github.com/ihebmbarek/postgres-operator
+      relatedImages:
+      - quay.io/iheb_mbarek/postgres-operator:v0.3.4
+      version: 0.3.4
+    entries:
+    - name: postgres-operator.v0.3.4
+      version: 0.3.4
+    - name: postgres-operator.v0.3.3
+      version: 0.3.3
+    - name: postgres-operator.v0.3.2
+      version: 0.3.2
+    - name: postgres-operator.v0.3.1
+      version: 0.3.1
+    name: stable
+  defaultChannel: stable
+  packageName: postgres-operator
+  provider:
+    name: Iheb Mbarek
+    url: https://github.com/ihebmbarek/postgres-operator

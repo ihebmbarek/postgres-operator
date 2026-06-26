@@ -218,10 +218,39 @@ type PostgreSQLClusterSpec struct {
 }
 
 // PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
+// ComplianceFinding describes one CIS-aligned security/compliance control result.
+type ComplianceFinding struct {
+	// ID is the stable identifier of the compliance control.
+	ID string `json:"id,omitempty"`
+
+	// Title is a short human-readable control name.
+	Title string `json:"title,omitempty"`
+
+	// Severity describes the risk level when the control fails.
+	// Example values: critical, high, medium, low.
+	Severity string `json:"severity,omitempty"`
+
+	// Status is Pass or Fail.
+	Status string `json:"status,omitempty"`
+
+	// Message provides evidence or remediation guidance.
+	Message string `json:"message,omitempty"`
+}
+
 type PostgreSQLClusterStatus struct {
 	Phase string `json:"phase,omitempty"`
 
 	Ready bool `json:"ready,omitempty"`
+
+	// CompliancePhase describes the overall CIS-aligned compliance state.
+	// Example values: Passed, Warning.
+	CompliancePhase string `json:"compliancePhase,omitempty"`
+
+	// ComplianceScore shows how many controls passed, for example "8/8".
+	ComplianceScore string `json:"complianceScore,omitempty"`
+
+	// ComplianceFindings lists CIS-aligned security control results.
+	ComplianceFindings []ComplianceFinding `json:"complianceFindings,omitempty"`
 
 	PostgresPod string `json:"postgresPod,omitempty"`
 

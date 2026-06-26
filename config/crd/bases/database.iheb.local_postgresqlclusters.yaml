@@ -287,7 +287,6 @@ spec:
                 type: string
             type: object
           status:
-            description: PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
             properties:
               backupCronJob:
                 description: BackupCronJob is the generated CronJob responsible for
@@ -308,6 +307,42 @@ spec:
                 format: int32
                 type: integer
               barmanService:
+                type: string
+              complianceFindings:
+                description: ComplianceFindings lists CIS-aligned security control
+                  results.
+                items:
+                  description: |-
+                    PostgreSQLClusterStatus defines the observed state of PostgreSQLCluster.
+                    ComplianceFinding describes one CIS-aligned security/compliance control result.
+                  properties:
+                    id:
+                      description: ID is the stable identifier of the compliance control.
+                      type: string
+                    message:
+                      description: Message provides evidence or remediation guidance.
+                      type: string
+                    severity:
+                      description: |-
+                        Severity describes the risk level when the control fails.
+                        Example values: critical, high, medium, low.
+                      type: string
+                    status:
+                      description: Status is Pass or Fail.
+                      type: string
+                    title:
+                      description: Title is a short human-readable control name.
+                      type: string
+                  type: object
+                type: array
+              compliancePhase:
+                description: |-
+                  CompliancePhase describes the overall CIS-aligned compliance state.
+                  Example values: Passed, Warning.
+                type: string
+              complianceScore:
+                description: ComplianceScore shows how many controls passed, for example
+                  "8/8".
                 type: string
               failoverPhase:
                 description: |-

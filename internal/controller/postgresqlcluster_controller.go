@@ -410,6 +410,8 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 		cluster.Status.RestoreJob = ""
 	}
 
+	evaluateClusterCompliance(&cluster)
+
 	if !reflect.DeepEqual(
 		originalStatus,
 		cluster.Status,
@@ -613,6 +615,7 @@ func restrictedPodSecurityContext() *corev1.PodSecurityContext {
 func restrictedContainerSecurityContext() *corev1.SecurityContext {
 	return &corev1.SecurityContext{
 		AllowPrivilegeEscalation: seccompBoolPtr(false),
+		Privileged:               seccompBoolPtr(false),
 		Capabilities: &corev1.Capabilities{
 			Drop: []corev1.Capability{
 				"ALL",

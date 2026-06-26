@@ -1,0 +1,123 @@
+apiVersion: database.iheb.local/v1
+kind: PostgreSQLCluster
+metadata:
+  annotations:
+    database.iheb.local/reconcile-at: "1782481790"
+  creationTimestamp: "2026-06-24T11:41:12Z"
+  generation: 3
+  name: demo-postgres
+  namespace: alpha
+  resourceVersion: "54634851"
+  uid: f2e40fc3-8d99-4551-a3bc-85e6422d5ee0
+spec:
+  backup:
+    archiveTimeout: 60
+    backupImage: quay.io/iheb_mbarek/postgres-barman:latest
+    barmanHost: 192.168.180.54
+    barmanServerName: demo-postgres
+    barmanUser: barman
+    enabled: true
+    exposeService: true
+    nodePort: 30434
+    replicationAllowedCIDR: 192.168.180.54/32
+    schedule: 0 2 * * *
+    sshSecretName: barman-ssh-key
+    streamingUser: streaming_barman
+    suspendScheduledBackups: false
+  cpuLimit: 500m
+  cpuRequest: 250m
+  database: appdb
+  highAvailability:
+    detectionTimeoutSeconds: 60
+    enabled: true
+    failoverMode: Manual
+    replicas: 2
+  image: quay.io/iheb_mbarek/postgres-barman:latest
+  memoryLimit: 512Mi
+  memoryRequest: 256Mi
+  pgbouncer:
+    defaultPoolSize: 20
+    enabled: true
+    image: docker.io/edoburu/pgbouncer:latest
+    maxClientConn: 100
+    poolMode: transaction
+    replicas: 1
+  postgresVersion: "16"
+  restore:
+    enabled: false
+  storageClassName: nfs-client
+  storageSize: 5Gi
+  tls:
+    enabled: true
+    requireClientCert: false
+    secretName: demo-postgres-tls
+    sslMode: require
+  user: appuser
+status:
+  backupCronJob: demo-postgres-barman-backup
+  backupEnabled: true
+  backupPhase: Scheduled
+  backupSchedule: 0 2 * * *
+  barmanNodePort: 30434
+  barmanService: demo-postgres-barman
+  complianceFindings:
+  - id: CIS-PG-001
+    message: PostgreSQL must enforce encrypted client connections using a Kubernetes
+      TLS Secret.
+    severity: high
+    status: Pass
+    title: PostgreSQL TLS must be enabled
+  - id: CIS-K8S-001
+    message: Generated PostgreSQL workloads must set runAsNonRoot=true.
+    severity: high
+    status: Pass
+    title: Pod must run as non-root
+  - id: CIS-K8S-002
+    message: Generated containers must set allowPrivilegeEscalation=false.
+    severity: critical
+    status: Pass
+    title: Privilege escalation must be disabled
+  - id: CIS-K8S-003
+    message: Generated containers must set privileged=false.
+    severity: critical
+    status: Pass
+    title: Containers must not run privileged
+  - id: CIS-K8S-004
+    message: Generated containers must drop all Linux capabilities.
+    severity: high
+    status: Pass
+    title: Linux capabilities must be dropped
+  - id: CIS-K8S-005
+    message: Generated pods must use seccompProfile.type=RuntimeDefault.
+    severity: medium
+    status: Pass
+    title: Seccomp RuntimeDefault must be used
+  - id: CIS-K8S-006
+    message: PostgreSQL container must define CPU and memory requests and limits.
+    severity: medium
+    status: Pass
+    title: PostgreSQL container resources must be configured
+  - id: CIS-PG-002
+    message: The operator manages database credentials in Secret "demo-postgres-credentials".
+    severity: high
+    status: Pass
+    title: Database credentials must be stored in Kubernetes Secret
+  compliancePhase: Passed
+  complianceScore: 8/8
+  failoverPhase: Healthy
+  haEnabled: true
+  haPhase: StandbyPlanned
+  lastBackupId: 20260626T060006
+  lastBackupStatus: DONE
+  lastBackupTime: "2026-06-26T02:00:24Z"
+  pgbouncerEnabled: true
+  pgbouncerPhase: Available
+  pgbouncerService: demo-postgres-pgbouncer
+  phase: Running
+  postgresPod: demo-postgres-0
+  primaryPod: demo-postgres-0
+  ready: true
+  restoreMessage: restore is disabled
+  restorePhase: Disabled
+  standbyPods:
+  - demo-postgres-standby-0

@@ -1,0 +1,12 @@
+---
+schema: olm.package
+name: postgres-operator
+defaultChannel: stable
+---
+schema: olm.channel
+package: postgres-operator
+name: stable
+entries:
+  - name: postgres-operator.v0.3.1
+  - name: postgres-operator.v0.3.2
+    replaces: postgres-operator.v0.3.1

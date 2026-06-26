@@ -92,13 +92,27 @@ metadata:
       ]
     capabilities: Basic Install
     createdAt: "2026-06-26T12:41:54Z"
+    olm.operatorGroup: pg-guardian-operatorgroup
+    olm.operatorNamespace: pg-guardian-olm
+    olm.targetNamespaces: ""
+    operatorframework.io/properties: '{"properties":[{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLBackup","version":"v1"}},{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLCluster","version":"v1"}},{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLRestore","version":"v1"}},{"type":"olm.package","value":{"packageName":"postgres-operator","version":"0.3.2"}}]}'
     operators.operatorframework.io/builder: operator-sdk-v1.40.0
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+  creationTimestamp: "2026-06-26T12:58:25Z"
+  finalizers:
+  - operators.coreos.com/csv-cleanup
+  generation: 1
+  labels:
+    olm.managed: "true"
+    operators.coreos.com/postgres-operator.pg-guardian-olm: ""
   name: postgres-operator.v0.3.2
-  namespace: placeholder
+  namespace: pg-guardian-olm
+  resourceVersion: "54561974"
+  uid: f1092643-be42-4fbd-9120-77e2e069e440
 spec:
-  replaces: postgres-operator.v0.3.1
   apiservicedefinitions: {}
+  cleanup:
+    enabled: false
   customresourcedefinitions:
     owned:
     - description: PostgreSQLBackup is the Schema for the postgresqlbackups API
@@ -346,4 +360,134 @@ spec:
   provider:
     name: Iheb Mbarek
     url: https://github.com/ihebmbarek/postgres-operator
+  replaces: postgres-operator.v0.3.1
   version: 0.3.2
+status:
+  cleanup: {}
+  conditions:
+  - lastTransitionTime: "2026-06-26T12:58:29Z"
+    lastUpdateTime: "2026-06-26T12:58:29Z"
+    message: requirements not yet checked
+    phase: Pending
+    reason: RequirementsUnknown
+  - lastTransitionTime: "2026-06-26T12:58:29Z"
+    lastUpdateTime: "2026-06-26T12:58:29Z"
+    message: one or more requirements couldn't be found
+    phase: Pending
+    reason: RequirementsNotMet
+  - lastTransitionTime: "2026-06-26T12:58:33Z"
+    lastUpdateTime: "2026-06-26T12:58:33Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2026-06-26T12:58:34Z"
+    lastUpdateTime: "2026-06-26T12:58:34Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2026-06-26T12:58:34Z"
+    lastUpdateTime: "2026-06-26T12:58:36Z"
+    message: 'installing: waiting for deployment postgres-operator-controller-manager
+      to become ready: deployment "postgres-operator-controller-manager" not available:
+      Deployment does not have minimum availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2026-06-26T12:58:49Z"
+    lastUpdateTime: "2026-06-26T12:58:49Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  lastTransitionTime: "2026-06-26T12:58:49Z"
+  lastUpdateTime: "2026-06-26T12:58:49Z"
+  message: install strategy completed with no errors
+  phase: Succeeded
+  reason: InstallSucceeded
+  requirementStatus:
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: postgresqlbackups.database.iheb.local
+    status: Present
+    uuid: 1b02d8c3-78d2-41fb-a51b-32a2325bd56f
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: postgresqlclusters.database.iheb.local
+    status: Present
+    uuid: 9da29eb9-6b98-41d5-866f-4314a857d0c4
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: postgresqlrestores.database.iheb.local
+    status: Present
+    uuid: a7bd4dad-6d30-45b7-b001-338576cd78c8
+    version: v1
+  - dependents:
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: namespaced rule:{"verbs":["get","list","watch","create","update","patch","delete"],"apiGroups":[""],"resources":["configmaps"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: namespaced rule:{"verbs":["get","list","watch","create","update","patch","delete"],"apiGroups":["coordination.k8s.io"],"resources":["leases"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: namespaced rule:{"verbs":["create","patch"],"apiGroups":[""],"resources":["events"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["configmaps","persistentvolumeclaims","secrets","services"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":[""],"resources":["pods"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["apps"],"resources":["deployments","statefulsets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["batch"],"resources":["cronjobs","jobs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups","postgresqlclusters","postgresqlrestores"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["update"],"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups/finalizers","postgresqlclusters/finalizers","postgresqlrestores/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","patch","update"],"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups/status","postgresqlclusters/status","postgresqlrestores/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create"],"apiGroups":["authentication.k8s.io"],"resources":["tokenreviews"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create"],"apiGroups":["authorization.k8s.io"],"resources":["subjectaccessreviews"]}
+      status: Satisfied
+      version: v1
+    group: ""
+    kind: ServiceAccount
+    message: ""
+    name: postgres-operator-controller-manager
+    status: Present
+    version: v1

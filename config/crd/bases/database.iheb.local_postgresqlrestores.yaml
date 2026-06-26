@@ -1,0 +1,117 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: postgresqlrestores.database.iheb.local
+spec:
+  group: database.iheb.local
+  names:
+    kind: PostgreSQLRestore
+    listKind: PostgreSQLRestoreList
+    plural: postgresqlrestores
+    shortNames:
+    - pgrestore
+    singular: postgresqlrestore
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterName
+      name: Cluster
+      type: string
+    - jsonPath: .spec.restoreMode
+      name: Mode
+      type: string
+    - jsonPath: .spec.backupId
+      name: Backup ID
+      type: string
+    - jsonPath: .spec.targetTime
+      name: Target Time
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: PostgreSQLRestore is the Schema for the postgresqlrestores API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PostgreSQLRestoreSpec defines the desired state of PostgreSQLRestore
+            properties:
+              backupId:
+                description: BackupID is the Barman backup ID to restore from.
+                type: string
+              barmanServerName:
+                description: |-
+                  BarmanServerName is the Barman server name used for restore.
+                  If empty, the operator can use the cluster default.
+                type: string
+              clusterName:
+                description: ClusterName is the name of the PostgreSQLCluster to restore.
+                minLength: 1
+                type: string
+              restoreMode:
+                default: latest
+                description: RestoreMode defines the restore mode.
+                enum:
+                - latest
+                - pitr
+                type: string
+              targetDatabaseName:
+                description: TargetDatabaseName is the database name after restore.
+                type: string
+              targetTime:
+                description: |-
+                  TargetTime is the point-in-time recovery target.
+                  Example: "2026-06-18 16:30:00"
+                type: string
+            required:
+            - clusterName
+            type: object
+          status:
+            description: PostgreSQLRestoreStatus defines the observed state of PostgreSQLRestore
+            properties:
+              completedAt:
+                description: CompletedAt is the restore completion time.
+                format: date-time
+                type: string
+              message:
+                description: Message contains human-readable status details.
+                type: string
+              phase:
+                description: |-
+                  Phase shows the restore lifecycle phase.
+                  Example: Pending, Running, Completed, Failed.
+                type: string
+              startedAt:
+                description: StartedAt is the restore start time.
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

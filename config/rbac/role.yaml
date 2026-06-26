@@ -56,7 +56,9 @@ rules:
 - apiGroups:
   - database.iheb.local
   resources:
+  - postgresqlbackups
   - postgresqlclusters
+  - postgresqlrestores
   verbs:
   - create
   - delete
@@ -68,13 +70,17 @@ rules:
 - apiGroups:
   - database.iheb.local
   resources:
+  - postgresqlbackups/finalizers
   - postgresqlclusters/finalizers
+  - postgresqlrestores/finalizers
   verbs:
   - update
 - apiGroups:
   - database.iheb.local
   resources:
+  - postgresqlbackups/status
   - postgresqlclusters/status
+  - postgresqlrestores/status
   verbs:
   - get
   - patch

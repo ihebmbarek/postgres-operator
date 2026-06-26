@@ -65,7 +65,6 @@ spec:
           metadata:
             type: object
           spec:
-            description: PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
             properties:
               backup:
                 description: Backup defines the optional Barman backup configuration.
@@ -263,6 +262,27 @@ spec:
                 type: string
               storageSize:
                 type: string
+              tls:
+                description: TLS configures PostgreSQL server-side SSL/TLS.
+                properties:
+                  enabled:
+                    description: Enabled enables PostgreSQL SSL/TLS.
+                    type: boolean
+                  requireClientCert:
+                    description: |-
+                      RequireClientCert enables client certificate authentication.
+                      Keep false for the first implementation.
+                    type: boolean
+                  secretName:
+                    description: SecretName is the Kubernetes Secret containing tls.crt,
+                      tls.key, and optionally ca.crt.
+                    type: string
+                  sslMode:
+                    description: |-
+                      SSLMode is the libpq sslmode used by generated clients such as Barman, standby and PgBouncer.
+                      Typical values: disable, require, verify-ca, verify-full.
+                    type: string
+                type: object
               user:
                 type: string
             type: object

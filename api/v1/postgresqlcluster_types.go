@@ -156,7 +156,33 @@ type HighAvailabilitySpec struct {
 }
 
 // PostgreSQLClusterSpec defines the desired state of PostgreSQLCluster.
+
+// PostgreSQLTLSSpec defines PostgreSQL server-side TLS configuration.
+type PostgreSQLTLSSpec struct {
+	// Enabled enables PostgreSQL SSL/TLS.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// SecretName is the Kubernetes Secret containing tls.crt, tls.key, and optionally ca.crt.
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
+
+	// SSLMode is the libpq sslmode used by generated clients such as Barman, standby and PgBouncer.
+	// Typical values: disable, require, verify-ca, verify-full.
+	// +optional
+	SSLMode string `json:"sslMode,omitempty"`
+
+	// RequireClientCert enables client certificate authentication.
+	// Keep false for the first implementation.
+	// +optional
+	RequireClientCert bool `json:"requireClientCert,omitempty"`
+}
+
 type PostgreSQLClusterSpec struct {
+	// TLS configures PostgreSQL server-side SSL/TLS.
+	// +optional
+	TLS PostgreSQLTLSSpec `json:"tls,omitempty"`
+
 	PostgresVersion string `json:"postgresVersion,omitempty"`
 
 	Image string `json:"image,omitempty"`

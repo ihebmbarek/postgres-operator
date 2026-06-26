@@ -1,0 +1,117 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  creationTimestamp: null
+  name: postgresqlbackups.database.iheb.local
+spec:
+  group: database.iheb.local
+  names:
+    kind: PostgreSQLBackup
+    listKind: PostgreSQLBackupList
+    plural: postgresqlbackups
+    shortNames:
+    - pgbackup
+    singular: postgresqlbackup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterName
+      name: Cluster
+      type: string
+    - jsonPath: .spec.backupType
+      name: Type
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.backupId
+      name: Backup ID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: PostgreSQLBackup is the Schema for the postgresqlbackups API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PostgreSQLBackupSpec defines the desired state of PostgreSQLBackup
+            properties:
+              backupType:
+                default: full
+                description: BackupType defines the backup type.
+                enum:
+                - full
+                - incremental
+                type: string
+              barmanServerName:
+                description: |-
+                  BarmanServerName is the Barman server name used for this backup.
+                  If empty, the operator can use the cluster default.
+                type: string
+              clusterName:
+                description: ClusterName is the name of the PostgreSQLCluster to back
+                  up.
+                minLength: 1
+                type: string
+              immediate:
+                default: true
+                description: Immediate tells the operator to start the backup immediately.
+                type: boolean
+            required:
+            - clusterName
+            type: object
+          status:
+            description: PostgreSQLBackupStatus defines the observed state of PostgreSQLBackup
+            properties:
+              backupId:
+                description: BackupID is the Barman backup ID after successful creation.
+                type: string
+              completedAt:
+                description: CompletedAt is the backup completion time.
+                format: date-time
+                type: string
+              message:
+                description: Message contains human-readable status details.
+                type: string
+              phase:
+                description: |-
+                  Phase shows the backup lifecycle phase.
+                  Example: Pending, Running, Completed, Failed.
+                type: string
+              startedAt:
+                description: StartedAt is the backup start time.
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: null
+  storedVersions: null

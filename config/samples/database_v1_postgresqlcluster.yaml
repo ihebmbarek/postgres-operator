@@ -6,6 +6,12 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: sample-postgres
 spec:
+  tls:
+    enabled: true
+    secretName: demo-postgres-tls
+    sslMode: require
+    requireClientCert: false
+
   postgresVersion: "16"
   image: "quay.io/iheb_mbarek/postgres-barman:latest"
   database: "appdb"

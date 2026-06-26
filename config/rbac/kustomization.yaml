@@ -22,6 +22,12 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the {{ .ProjectName }} itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- postgresqlrestore_admin_role.yaml
+- postgresqlrestore_editor_role.yaml
+- postgresqlrestore_viewer_role.yaml
+- postgresqlbackup_admin_role.yaml
+- postgresqlbackup_editor_role.yaml
+- postgresqlbackup_viewer_role.yaml
 - postgresqlcluster_admin_role.yaml
 - postgresqlcluster_editor_role.yaml
 - postgresqlcluster_viewer_role.yaml

@@ -10,10 +10,20 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
+    - description: PostgreSQLBackup is the Schema for the postgresqlbackups API
+      displayName: Postgre SQLBackup
+      kind: PostgreSQLBackup
+      name: postgresqlbackups.database.iheb.local
+      version: v1
     - description: PostgreSQLCluster is the Schema for the postgresqlclusters API.
       displayName: Postgre SQLCluster
       kind: PostgreSQLCluster
       name: postgresqlclusters.database.iheb.local
+      version: v1
+    - description: PostgreSQLRestore is the Schema for the postgresqlrestores API
+      displayName: Postgre SQLRestore
+      kind: PostgreSQLRestore
+      name: postgresqlrestores.database.iheb.local
       version: v1
   description: PG Guardian is a PostgreSQL Operator for OpenShift that automates PostgreSQL
     deployment, persistent storage, Barman backup integration, scheduled backups,

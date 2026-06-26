@@ -3,6 +3,8 @@
 # It should be run by config/default
 resources:
 - bases/database.iheb.local_postgresqlclusters.yaml
+- bases/database.iheb.local_postgresqlbackups.yaml
+- bases/database.iheb.local_postgresqlrestores.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

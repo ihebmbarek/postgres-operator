@@ -20,4 +20,22 @@ resources:
   kind: PostgreSQLCluster
   path: github.com/ihebmbarek/postgres-operator/api/v1
   version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: iheb.local
+  group: database
+  kind: PostgreSQLBackup
+  path: github.com/ihebmbarek/postgres-operator/api/v1
+  version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: iheb.local
+  group: database
+  kind: PostgreSQLRestore
+  path: github.com/ihebmbarek/postgres-operator/api/v1
+  version: v1
 version: "3"

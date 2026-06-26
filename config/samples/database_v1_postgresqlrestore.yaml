@@ -1,0 +1,9 @@
+apiVersion: database.iheb.local/v1
+kind: PostgreSQLRestore
+metadata:
+  labels:
+    app.kubernetes.io/name: postgres-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: postgresqlrestore-sample
+spec:
+  # TODO(user): Add fields here

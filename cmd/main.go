@@ -209,6 +209,20 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "PostgreSQLCluster")
 		os.Exit(1)
 	}
+	if err = (&controller.PostgreSQLBackupReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PostgreSQLBackup")
+		os.Exit(1)
+	}
+	if err = (&controller.PostgreSQLRestoreReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PostgreSQLRestore")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {

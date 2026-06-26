@@ -1,0 +1,24 @@
+===== SSL SETTINGS =====
+ ssl 
+-----
+ on
+(1 row)
+
+         ssl_cert_file          
+--------------------------------
+ /etc/postgresql/tls/server.crt
+(1 row)
+
+          ssl_key_file          
+--------------------------------
+ /etc/postgresql/tls/server.key
+(1 row)
+
+===== SSL CONNECTION TEST =====
+ ssl 
+-----
+ t
+(1 row)
+
+===== NON SSL SHOULD FAIL =====
+OK: non-SSL connection rejected

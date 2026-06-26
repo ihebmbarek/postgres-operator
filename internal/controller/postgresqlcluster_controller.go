@@ -1135,14 +1135,19 @@ func buildCustomPostgresConfig(
 		archiveTimeout = 60
 	}
 
+	tlsConfig := postgresTLSConfig(cluster)
+
 	if !cluster.Spec.Backup.Enabled {
-		return `listen_addresses = '*'
-hba_file = '/etc/postgresql/pg_hba.conf'
-wal_level = replica
-archive_mode = off
-max_wal_senders = 5
-archive_timeout = 60
-`
+		return fmt.Sprintf(
+			"listen_addresses = '*'\n"+
+				"hba_file = '/etc/postgresql/pg_hba.conf'\n"+
+				"%s"+
+				"wal_level = replica\n"+
+				"archive_mode = off\n"+
+				"max_wal_senders = 5\n"+
+				"archive_timeout = 60\n",
+			tlsConfig,
+		)
 	}
 
 	barmanUser := cluster.Spec.Backup.BarmanUser
@@ -1156,14 +1161,15 @@ archive_timeout = 60
 	}
 
 	return fmt.Sprintf(
-		`listen_addresses = '*'
-hba_file = '/etc/postgresql/pg_hba.conf'
-wal_level = replica
-archive_mode = on
-max_wal_senders = 5
-archive_timeout = %d
-archive_command = 'PATH=/etc/barman-ssh:$PATH barman-wal-archive -U %s %s %s %%p'
-`,
+		"listen_addresses = '*'\n"+
+			"hba_file = '/etc/postgresql/pg_hba.conf'\n"+
+			"%s"+
+			"wal_level = replica\n"+
+			"archive_mode = on\n"+
+			"max_wal_senders = 5\n"+
+			"archive_timeout = %d\n"+
+			"archive_command = 'PATH=/etc/barman-ssh:$PATH barman-wal-archive -U %s %s %s %%p'\n",
+		tlsConfig,
 		archiveTimeout,
 		barmanUser,
 		cluster.Spec.Backup.BarmanHost,
@@ -1182,16 +1188,47 @@ func effectiveStreamingUser(
 	return streamingUser
 }
 
+func postgresTLSConfig(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	if !cluster.Spec.TLS.Enabled {
+		return "ssl = off\npassword_encryption = 'scram-sha-256'\n"
+	}
+
+	return "ssl = on\n" +
+		"ssl_cert_file = '/etc/postgresql/tls/server.crt'\n" +
+		"ssl_key_file = '/etc/postgresql/tls/server.key'\n" +
+		"ssl_ca_file = '/etc/postgresql/tls/ca.crt'\n" +
+		"password_encryption = 'scram-sha-256'\n"
+}
+
+func postgresHBAHostType(
+	cluster *databasev1.PostgreSQLCluster,
+) string {
+	if cluster.Spec.TLS.Enabled {
+		return "hostssl"
+	}
+
+	return "host"
+}
+
 func buildManagedPostgresHBA(
 	cluster *databasev1.PostgreSQLCluster,
 ) string {
-	baseRules := `# Managed by postgres-operator. Do not edit manually.
-local   all             all                                     trust
-host    all             all             127.0.0.1/32            scram-sha-256
-host    all             all             ::1/128                 scram-sha-256
-host    all             all             0.0.0.0/0               scram-sha-256
-host    all             all             ::/0                    scram-sha-256
-`
+	hostType := postgresHBAHostType(cluster)
+
+	baseRules := fmt.Sprintf(
+		"# Managed by postgres-operator. Do not edit manually.\n"+
+			"local   all             all                                     trust\n"+
+			"%s      all             all             127.0.0.1/32            scram-sha-256\n"+
+			"%s      all             all             ::1/128                 scram-sha-256\n"+
+			"%s      all             all             0.0.0.0/0               scram-sha-256\n"+
+			"%s      all             all             ::/0                    scram-sha-256\n",
+		hostType,
+		hostType,
+		hostType,
+		hostType,
+	)
 
 	if !cluster.Spec.Backup.Enabled ||
 		cluster.Spec.Backup.ReplicationAllowedCIDR == "" {
@@ -1199,8 +1236,9 @@ host    all             all             ::/0                    scram-sha-256
 	}
 
 	return fmt.Sprintf(
-		"%s\nhost    replication     %s    %s    scram-sha-256\n",
+		"%s\n%s      replication     %s    %s    scram-sha-256\n",
 		baseRules,
+		hostType,
 		effectiveStreamingUser(cluster),
 		cluster.Spec.Backup.ReplicationAllowedCIDR,
 	)
@@ -1392,6 +1430,68 @@ func (r *PostgreSQLClusterReconciler) buildStatefulSet(
 
 	initContainers := []corev1.Container{}
 
+	if cluster.Spec.TLS.Enabled && cluster.Spec.TLS.SecretName != "" {
+		volumeMounts = append(
+			volumeMounts,
+			corev1.VolumeMount{
+				Name:      "postgres-tls-runtime",
+				MountPath: "/etc/postgresql/tls",
+				ReadOnly:  true,
+			},
+		)
+
+		volumes = append(
+			volumes,
+			corev1.Volume{
+				Name: "postgres-tls-secret",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName:  cluster.Spec.TLS.SecretName,
+						DefaultMode: int32Ptr(0440),
+					},
+				},
+			},
+			corev1.Volume{
+				Name: "postgres-tls-runtime",
+				VolumeSource: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
+		)
+
+		initContainers = append(
+			initContainers,
+			corev1.Container{
+				Name:            "prepare-postgres-tls",
+				SecurityContext: restrictedContainerSecurityContext(),
+				Image:           image,
+				Command: []string{
+					"/bin/sh",
+					"-ec",
+				},
+				Args: []string{
+					"cp /var/run/postgres-tls-source/tls.crt /etc/postgresql/tls/server.crt\n" +
+						"cp /var/run/postgres-tls-source/tls.key /etc/postgresql/tls/server.key\n" +
+						"if [ -f /var/run/postgres-tls-source/ca.crt ]; then cp /var/run/postgres-tls-source/ca.crt /etc/postgresql/tls/ca.crt; else cp /var/run/postgres-tls-source/tls.crt /etc/postgresql/tls/ca.crt; fi\n" +
+						"chmod 644 /etc/postgresql/tls/server.crt\n" +
+						"chmod 600 /etc/postgresql/tls/server.key\n" +
+						"chmod 644 /etc/postgresql/tls/ca.crt\n",
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "postgres-tls-secret",
+						MountPath: "/var/run/postgres-tls-source",
+						ReadOnly:  true,
+					},
+					{
+						Name:      "postgres-tls-runtime",
+						MountPath: "/etc/postgresql/tls",
+					},
+				},
+			},
+		)
+	}
+
 	if cluster.Spec.Backup.Enabled &&
 		cluster.Spec.Backup.SSHSecretName != "" {
 		volumeMounts = append(
@@ -1493,7 +1593,9 @@ chmod 755 /etc/barman-ssh/ssh
 			[]byte(
 				buildCustomPostgresConfig(cluster)+
 					"\n---pg_hba.conf---\n"+
-					buildManagedPostgresHBA(cluster),
+					buildManagedPostgresHBA(cluster)+
+					"\n---tls-secret---\n"+
+					cluster.Spec.TLS.SecretName,
 			),
 		),
 	)

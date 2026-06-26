@@ -1,0 +1,14 @@
+===== SSL ENABLED =====
+ ssl 
+-----
+ on
+(1 row)
+
+===== SSL CONNECTION =====
+ ssl 
+-----
+ t
+(1 row)
+
+===== NON SSL SHOULD FAIL =====
+OK: non-SSL rejected

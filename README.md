@@ -1,136 +1,300 @@
-# PG Guardian PostgreSQL Operator
+# PG Guardian — PostgreSQL Operator for OpenShift/Kubernetes
 
-PG Guardian is a Kubernetes/OpenShift Operator built with Kubebuilder to manage PostgreSQL clusters with backup, restore, connection pooling, monitoring, OLM packaging, and automatic failover.
+PG Guardian is a Kubernetes/OpenShift Operator that manages PostgreSQL clusters as cloud-native workloads. It automates the creation and reconciliation of PostgreSQL resources, integrates backup and restore workflows with Barman, exposes monitoring metrics, enforces security controls, and generates SRE-oriented SLO/SLI alerts.
 
-The project was developed as a final-year engineering project to demonstrate how a custom Kubernetes Operator can automate the lifecycle of a production-style PostgreSQL workload on OpenShift.
+The project was built as a final-year engineering project to demonstrate Kubernetes Operator development, PostgreSQL administration, OpenShift deployment, backup strategy, monitoring, security compliance, and SRE practices.
 
 ---
 
-## Project Overview
+## Table of Contents
 
-PG Guardian manages PostgreSQL as a Kubernetes-native custom resource.
+* [Overview](#overview)
+* [Main Features](#main-features)
+* [Architecture](#architecture)
+* [Custom Resources](#custom-resources)
+* [Current Release](#current-release)
+* [Container Images](#container-images)
+* [Deployment Modes](#deployment-modes)
+* [Example PostgreSQLCluster](#example-postgresqlcluster)
+* [Backup and PITR](#backup-and-pitr)
+* [TLS Security](#tls-security)
+* [CIS-Aligned Compliance](#cis-aligned-compliance)
+* [SLO/SLI Monitoring](#slosli-monitoring)
+* [PgBouncer](#pgbouncer)
+* [OLM Installation](#olm-installation)
+* [Useful Verification Commands](#useful-verification-commands)
+* [Proofs](#proofs)
+* [Project Status](#project-status)
+* [Future Work](#future-work)
 
-Instead of manually creating StatefulSets, Services, Secrets, ConfigMaps, backup jobs, monitoring resources, and failover workflows, the user creates a single `PostgreSQLCluster` custom resource. The operator reconciles the desired state and creates all required Kubernetes/OpenShift resources automatically.
+---
 
-The operator supports:
+## Overview
 
-* PostgreSQL StatefulSet lifecycle management
-* Persistent storage through PVCs
-* PostgreSQL credentials management through Secrets
-* Custom PostgreSQL configuration through ConfigMaps
-* Barman integration for backup and WAL archiving
-* Scheduled backup CronJobs
-* Point-in-Time Recovery preparation
-* NodePort exposure for Barman connectivity
-* HAProxy integration on the external Barman host
+PG Guardian introduces a custom Kubernetes resource named `PostgreSQLCluster`.
+When a `PostgreSQLCluster` object is created, the operator reconciles the required Kubernetes resources to run PostgreSQL on OpenShift/Kubernetes.
+
+The operator manages:
+
+* PostgreSQL `StatefulSet`
+* PostgreSQL services
+* Persistent storage
+* Database credentials
+* PostgreSQL configuration
+* Barman backup integration
+* Backup CronJobs
 * PgBouncer connection pooling
 * PostgreSQL exporter monitoring
-* Prometheus ServiceMonitor and PrometheusRule resources
-* OpenShift-compatible restricted security contexts
-* OLM packaging and upgrade workflow
-* Real standby PostgreSQL instance using streaming replication
-* Automatic failover with standby promotion
-* Service switch to the promoted standby
-* Old primary fencing to prevent split-brain
+* Prometheus alert rules
+* TLS enforcement
+* CIS-aligned compliance status
+* SLO/SLI Prometheus rules
+* OLM packaging and upgrades
 
 ---
 
-## Current Release Status
+## Main Features
 
-Current main release:
+### PostgreSQL Lifecycle Management
+
+The operator creates and reconciles the core PostgreSQL workload:
+
+* `StatefulSet`
+* headless service
+* optional NodePort/Barman service
+* persistent volume claim
+* credentials secret
+* configuration configmap
+
+### Backup Integration
+
+PG Guardian integrates with Barman using SSH-based WAL archiving and scheduled backups.
+
+Supported backup-related capabilities:
+
+* Barman SSH key secret
+* WAL archiving configuration
+* streaming replication user
+* backup CronJob generation
+* backup status fields
+* backup proofs
+* manual PITR validation workflow
+
+### TLS Enforcement
+
+The operator supports PostgreSQL TLS configuration through Kubernetes secrets.
+
+Implemented behavior:
+
+* mounts TLS certificate and key
+* prepares runtime TLS files
+* enables PostgreSQL SSL
+* rejects non-SSL client connections when configured
+* verifies encrypted PostgreSQL sessions through `pg_stat_ssl`
+
+### PgBouncer
+
+The operator can deploy PgBouncer as a connection pooler for PostgreSQL.
+
+Managed resources:
+
+* PgBouncer Deployment
+* PgBouncer Service
+* PgBouncer ConfigMap
+* PgBouncer status in the `PostgreSQLCluster`
+
+### Monitoring
+
+The project includes PostgreSQL and operator monitoring resources:
+
+* PostgreSQL exporter
+* PostgreSQL exporter ServiceMonitor
+* PostgreSQL database PrometheusRule
+* operator metrics ServiceMonitor
+* operator health alerts
+
+### CIS-Aligned Compliance
+
+PG Guardian evaluates a set of CIS-aligned workload security controls and exposes the result in the custom resource status.
+
+Implemented checks:
+
+* PostgreSQL TLS enabled
+* pod runs as non-root
+* privilege escalation disabled
+* containers are not privileged
+* Linux capabilities dropped
+* seccomp RuntimeDefault enabled
+* PostgreSQL CPU and memory resources configured
+* credentials stored in Kubernetes Secret
+
+Example status:
 
 ```text
-Operator version: v0.3.0
-Operator image: quay.io/iheb_mbarek/postgres-operator:v0.3.0
-Bundle image:   quay.io/iheb_mbarek/postgres-operator-bundle:v0.3.0
-Catalog image:  quay.io/iheb_mbarek/postgres-operator-catalog:v0.3.3
+compliancePhase: Passed
+complianceScore: 8/8
 ```
 
-The catalog image tag is `v0.3.3` because the catalog packaging was fixed after the `v0.3.0` operator release. The catalog still serves the operator CSV:
+### SLO/SLI Monitoring
+
+PG Guardian generates SRE-style PrometheusRule objects per PostgreSQL cluster.
+
+Generated SLO/SLI alerts include:
+
+* PostgreSQL availability SLO breach
+* backup freshness SLO breach
+* backup job failure
+* PgBouncer availability SLO breach
+
+Example generated rule:
 
 ```text
-postgres-operator.v0.3.0
-```
-
-Final verified OLM state:
-
-```text
-CSV: postgres-operator.v0.3.0
-Phase: Succeeded
-Deployment image: quay.io/iheb_mbarek/postgres-operator:v0.3.0
-Controller pod: Running
+demo-postgres-slo-alerts
 ```
 
 ---
 
-## Repository Structure
-
-Important project directories and files:
+## Architecture
 
 ```text
-api/v1/
-  postgresqlcluster_types.go
-  zz_generated.deepcopy.go
-
-internal/controller/
-  postgresqlcluster_controller.go
-
-config/
-  crd/
-  manager/
-  rbac/
-  samples/
-
-bundle/
-  manifests/
-  metadata/
-
-catalog/
-  index.yaml
-
-docs/
-  automatic-failover.md
-
-Dockerfile
-bundle.Dockerfile
-catalog.Dockerfile
-Makefile
-go.mod
-go.sum
-README.md
++---------------------------+
+| PostgreSQLCluster CR      |
+| database.iheb.local/v1    |
++-------------+-------------+
+              |
+              v
++---------------------------+
+| PG Guardian Operator      |
+| controller-runtime / Go   |
++-------------+-------------+
+              |
+              +-------------------------------+
+              |                               |
+              v                               v
++---------------------------+     +---------------------------+
+| PostgreSQL Workload       |     | Backup Integration        |
+| StatefulSet / Service     |     | Barman / CronJob / SSH    |
+| PVC / Secret / ConfigMap  |     | WAL Archiving / PITR      |
++-------------+-------------+     +-------------+-------------+
+              |                               |
+              v                               v
++---------------------------+     +---------------------------+
+| PgBouncer                 |     | Monitoring                |
+| Deployment / Service      |     | Exporter / ServiceMonitor |
++-------------+-------------+     | PrometheusRule            |
+              |                   +-------------+-------------+
+              v                                 |
++---------------------------+                   v
+| Security and SRE          |     +---------------------------+
+| TLS / CIS / SLO / SLI     |     | OpenShift Monitoring      |
++---------------------------+     +---------------------------+
 ```
-
-### Key File Responsibilities
-
-| File                                                            | Purpose                                                                              |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `api/v1/postgresqlcluster_types.go`                             | Defines the PostgreSQLCluster CRD spec and status                                    |
-| `internal/controller/postgresqlcluster_controller.go`           | Main reconcile logic for PostgreSQL, backups, PgBouncer, monitoring, HA and failover |
-| `config/samples/database_v1_postgresqlcluster.yaml`             | Example custom resource                                                              |
-| `bundle/manifests/postgres-operator.clusterserviceversion.yaml` | OLM ClusterServiceVersion                                                            |
-| `catalog/index.yaml`                                            | File-based catalog definition                                                        |
-| `docs/automatic-failover.md`                                    | Detailed automatic failover documentation                                            |
 
 ---
 
-## Custom Resource: PostgreSQLCluster
+## Custom Resources
 
-The operator introduces the following custom resource:
+The operator manages the following custom resources:
 
 ```text
-apiVersion: database.iheb.local/v1
-kind: PostgreSQLCluster
+PostgreSQLCluster
+PostgreSQLBackup
+PostgreSQLRestore
 ```
 
-The CR describes the desired PostgreSQL cluster configuration.
+Main API group:
 
-Example:
+```text
+database.iheb.local/v1
+```
+
+---
+
+## Current Release
+
+Current tested OLM release:
+
+```text
+postgres-operator.v0.3.4
+```
+
+Release highlights:
+
+* PostgreSQL lifecycle reconciliation
+* Barman backup integration
+* PgBouncer support
+* TLS enforcement
+* CIS-aligned compliance status
+* SLO/SLI PrometheusRule generation
+* OLM packaging and upgrade path
+
+---
+
+## Container Images
+
+Manager image:
+
+```text
+quay.io/iheb_mbarek/postgres-operator:v0.3.4
+```
+
+Bundle image:
+
+```text
+quay.io/iheb_mbarek/postgres-operator-bundle:v0.3.4
+```
+
+Catalog image:
+
+```text
+quay.io/iheb_mbarek/postgres-operator-catalog:v0.3.4
+```
+
+---
+
+## Deployment Modes
+
+PG Guardian supports two deployment modes.
+
+### Development Deployment
+
+Used during local development:
+
+```bash
+make deploy IMG=quay.io/iheb_mbarek/postgres-operator:<tag>
+```
+
+Development namespace:
+
+```text
+postgres-operator-system
+```
+
+### OLM Deployment
+
+Used for production-like installation through Operator Lifecycle Manager.
+
+OLM namespace:
+
+```text
+pg-guardian-olm
+```
+
+CatalogSource namespace:
+
+```text
+openshift-marketplace
+```
+
+---
+
+## Example PostgreSQLCluster
 
 ```yaml
 apiVersion: database.iheb.local/v1
 kind: PostgreSQLCluster
 metadata:
-  name: sample-postgres
+  name: demo-postgres
   namespace: alpha
 spec:
   postgresVersion: "16"
@@ -142,801 +306,388 @@ spec:
   storageSize: 5Gi
   storageClass: nfs-client
 
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+  cpuRequest: 250m
+  cpuLimit: 500m
+  memoryRequest: 256Mi
+  memoryLimit: 512Mi
+
+  tls:
+    enabled: true
+    secretName: demo-postgres-tls
+    sslMode: require
 
   backup:
     enabled: true
     barmanHost: 192.168.180.54
     barmanUser: barman
-    sshSecretName: sample-postgres-barman-ssh
-    archiveTimeout: 60
-    barmanServerName: sample-postgres
+    sshSecretName: barman-ssh-key
+    archiveTimeout: "60"
+    barmanServerName: demo-postgres
     exposeService: true
     nodePort: 30433
     schedule: "0 2 * * *"
     suspendScheduledBackups: false
-    backupImage: quay.io/iheb_mbarek/postgres-barman:latest
-    replicationAllowedCIDR: 10.128.0.0/14
+    replicationAllowedCIDR: 0.0.0.0/0
     streamingUser: streaming_barman
 
   pgbouncer:
     enabled: true
     replicas: 1
-    image: edoburu/pgbouncer:latest
-    poolMode: transaction
+    poolMode: session
     maxClientConn: 100
     defaultPoolSize: 20
-
-  highAvailability:
-    enabled: true
-    replicas: 2
-    failoverMode: Automatic
-    detectionTimeoutSeconds: 30
 ```
 
 ---
 
-## Main Managed Resources
+## Backup and PITR
 
-For a PostgreSQLCluster named `sample-postgres`, the operator can create and manage:
+PG Guardian integrates PostgreSQL with Barman for backup and recovery workflows.
 
-```text
-StatefulSet/sample-postgres
-StatefulSet/sample-postgres-standby
-Service/sample-postgres
-Service/sample-postgres-barman
-Secret/sample-postgres-credentials
-Secret/sample-postgres-streaming-credentials
-ConfigMap/sample-postgres-config
-CronJob/sample-postgres-barman-backup
-Deployment/sample-postgres-pgbouncer
-Service/sample-postgres-pgbouncer
-Deployment/sample-postgres-exporter
-Service/sample-postgres-exporter
-ServiceMonitor/sample-postgres-exporter
-PrometheusRule/sample-postgres-database-alerts
-Job/sample-postgres-promote-standby
-```
-
----
-
-## Architecture
-
-The architecture is composed of the following main layers:
-
-```text
-User / DBA
-   |
-   v
-PostgreSQLCluster Custom Resource
-   |
-   v
-PG Guardian Operator Controller
-   |
-   +--> PostgreSQL primary StatefulSet
-   +--> PostgreSQL standby StatefulSet
-   +--> PostgreSQL service
-   +--> PgBouncer deployment
-   +--> Barman backup integration
-   +--> CronJob scheduled backups
-   +--> Monitoring resources
-   +--> Automatic failover workflow
-```
-
-External backup architecture:
-
-```text
-PostgreSQL Pod
-   |
-   | WAL archive / streaming replication
-   v
-NodePort Service
-   |
-   v
-OpenShift Node
-   |
-   v
-HAProxy on Barman host
-   |
-   v
-Barman Server
-```
-
----
-
-## PostgreSQL Lifecycle Management
-
-The operator creates a PostgreSQL StatefulSet with:
-
-* Persistent volume claim
-* PostgreSQL container image
-* Custom environment variables
-* Credentials from Kubernetes Secret
-* PostgreSQL configuration mounted from ConfigMap
-* Liveness and readiness probes
-* Restricted security context for OpenShift compatibility
-
-The primary pod is normally named:
-
-```text
-sample-postgres-0
-```
-
-The primary service is:
-
-```text
-sample-postgres
-```
-
-This service is used by clients and PgBouncer to reach PostgreSQL.
-
----
-
-## PostgreSQL Configuration
-
-The operator generates PostgreSQL configuration using ConfigMaps.
-
-Important PostgreSQL settings include:
-
-```text
-listen_addresses = '*'
-wal_level = replica
-archive_mode = on
-archive_timeout = 60
-max_wal_senders = 5
-hba_file = /etc/postgresql/pg_hba.conf
-```
-
-When Barman backup is enabled, the operator configures WAL archiving using an archive command that sends WAL files to the external Barman server.
-
----
-
-## Credentials
-
-The operator manages several credentials:
-
-### Application credentials
-
-Stored in:
-
-```text
-Secret/sample-postgres-credentials
-```
-
-Used for:
-
-```text
-POSTGRES_DB
-POSTGRES_USER
-POSTGRES_PASSWORD
-```
-
-### Streaming replication credentials
-
-Stored in:
-
-```text
-Secret/sample-postgres-streaming-credentials
-```
-
-Used by the standby pod to connect to the primary using streaming replication.
-
-### SSH credentials for Barman
-
-Stored in a Kubernetes Secret specified by:
-
-```yaml
-backup:
-  sshSecretName: sample-postgres-barman-ssh
-```
-
-This secret contains the SSH private key and known hosts configuration required to connect to the external Barman server.
-
----
-
-## Barman Backup Integration
-
-Barman is used as the external PostgreSQL backup and WAL archive system.
-
-The operator supports:
+Implemented backup mechanisms:
 
 * WAL archiving
-* Streaming replication user creation
-* Scheduled backups using CronJobs
-* Backup status reporting
-* NodePort exposure for external Barman access
+* streaming archiver
+* backup CronJob
+* Barman SSH integration
+* backup status in the custom resource
+* proof-based backup validation
 
-Barman server name example:
+Example checks:
 
-```text
-sample-postgres
+```bash
+oc get cronjob -n alpha
+
+oc get pods -n alpha | grep backup
+
+oc get postgresqlcluster demo-postgres -n alpha \
+  -o jsonpath='{.status.backupEnabled}{"\n"}{.status.backupPhase}{"\n"}{.status.backupCronJob}{"\n"}'
 ```
 
-Typical Barman configuration on the external server:
+Manual PITR was validated as part of the project proof workflow. Full automatic PITR orchestration can be extended as future work.
+
+---
+
+## TLS Security
+
+TLS is enabled through the `spec.tls` section of the `PostgreSQLCluster`.
+
+The operator:
+
+* mounts the Kubernetes TLS secret
+* prepares runtime certificate files
+* enables SSL in PostgreSQL
+* updates PostgreSQL authentication rules
+* enforces encrypted client connections
+
+Verification:
+
+```bash
+oc exec -it demo-postgres-0 -n alpha -- psql -U appuser -d appdb -c "SHOW ssl;"
+
+oc exec -it demo-postgres-0 -n alpha -- psql -U appuser -d appdb -c \
+"SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
+```
+
+Expected:
 
 ```text
-conninfo = host=127.0.0.1 port=15433 user=barman_backup dbname=appdb
-streaming_conninfo = host=127.0.0.1 port=15433 user=streaming_barman
-backup_method = postgres
-archiver = on
-streaming_archiver = on
-slot_name = sample_postgres_slot
-create_slot = auto
+ssl
+-----
+on
+
+ssl
+-----
+t
 ```
 
 ---
 
-## HAProxy and NodePort
+## CIS-Aligned Compliance
 
-Because the Barman server is outside the OpenShift cluster, the PostgreSQL service is exposed using a NodePort.
+The operator evaluates security controls and writes the result to the `PostgreSQLCluster` status.
 
-Example NodePort:
+Check compliance status:
+
+```bash
+oc get postgresqlcluster demo-postgres -n alpha \
+  -o jsonpath='{.status.compliancePhase}{"\n"}{.status.complianceScore}{"\n"}'
+```
+
+Expected:
 
 ```text
-30433
+Passed
+8/8
 ```
 
-The external Barman host uses HAProxy to forward a local port to the OpenShift NodePort.
+List findings:
 
-Example flow:
+```bash
+oc get postgresqlcluster demo-postgres -n alpha \
+  -o jsonpath='{range .status.complianceFindings[*]}{.id}{" | "}{.status}{" | "}{.severity}{" | "}{.title}{"\n"}{end}'
+```
+
+Example output:
 
 ```text
-Barman localhost:15433
-   |
-   v
-HAProxy
-   |
-   v
-OpenShift node IP:30433
-   |
-   v
-sample-postgres-barman service
-   |
-   v
-PostgreSQL pod port 5432
-```
-
-This allows Barman to connect to PostgreSQL as if it were local while the database remains inside OpenShift.
-
----
-
-## Scheduled Backups
-
-The operator creates a CronJob when backup scheduling is enabled.
-
-Example schedule:
-
-```yaml
-backup:
-  schedule: "0 2 * * *"
-```
-
-This creates:
-
-```text
-CronJob/sample-postgres-barman-backup
-```
-
-The CronJob runs a backup image and triggers Barman backup commands.
-
-The operator also stores backup-related status fields in the PostgreSQLCluster status.
-
----
-
-## Point-in-Time Recovery
-
-The project includes PITR preparation and validation using Barman.
-
-The general PITR workflow is:
-
-1. PostgreSQL archives WAL files to Barman.
-2. Barman stores base backups and WAL history.
-3. A restore target time can be selected.
-4. Barman restores the database to the desired point.
-5. The restored database is queried to prove that PITR succeeded.
-
-PITR was validated manually during the project and treated as a controlled recovery operation.
-
----
-
-## PgBouncer Connection Pooling
-
-The operator supports optional PgBouncer deployment.
-
-Example configuration:
-
-```yaml
-pgbouncer:
-  enabled: true
-  replicas: 1
-  image: edoburu/pgbouncer:latest
-  poolMode: transaction
-  maxClientConn: 100
-  defaultPoolSize: 20
-```
-
-Created resources:
-
-```text
-Deployment/sample-postgres-pgbouncer
-Service/sample-postgres-pgbouncer
-ConfigMap/sample-postgres-pgbouncer
-```
-
-PgBouncer connects to the PostgreSQL service and provides a pooled connection endpoint for applications.
-
----
-
-## Monitoring and Alerts
-
-The project integrates PostgreSQL monitoring using:
-
-* PostgreSQL exporter
-* ServiceMonitor
-* PrometheusRule
-
-Managed resources include:
-
-```text
-Deployment/sample-postgres-exporter
-Service/sample-postgres-exporter
-ServiceMonitor/sample-postgres-exporter
-PrometheusRule/sample-postgres-database-alerts
-```
-
-The operator also includes monitoring for its own controller manager when installed through OLM.
-
-Example alerts include:
-
-```text
-PGGuardianOperatorDown
-PostgreSQLDown
-PostgreSQLExporterDown
+CIS-PG-001 | Pass | high | PostgreSQL TLS must be enabled
+CIS-K8S-001 | Pass | high | Pod must run as non-root
+CIS-K8S-002 | Pass | critical | Privilege escalation must be disabled
+CIS-K8S-003 | Pass | critical | Containers must not run privileged
+CIS-K8S-004 | Pass | high | Linux capabilities must be dropped
+CIS-K8S-005 | Pass | medium | Seccomp RuntimeDefault must be used
+CIS-K8S-006 | Pass | medium | PostgreSQL container resources must be configured
+CIS-PG-002 | Pass | high | Database credentials must be stored in Kubernetes Secret
 ```
 
 ---
 
-## OpenShift Security
+## SLO/SLI Monitoring
 
-The operator was adjusted to work with OpenShift restricted security requirements.
+PG Guardian generates SLO/SLI Prometheus alerts for every PostgreSQL cluster.
 
-Security improvements include:
+The generated resource name follows this pattern:
 
-* Non-root compatible containers
-* Restricted security contexts
-* No unnecessary privileged permissions
-* RBAC permissions for required Kubernetes resources
-* Idempotent reconciliation to avoid unnecessary rollouts
+```text
+<cluster-name>-slo-alerts
+```
 
-The controller manager runs through OLM in the namespace:
+Example:
+
+```text
+demo-postgres-slo-alerts
+```
+
+Check the generated SLO rule:
+
+```bash
+oc get prometheusrule demo-postgres-slo-alerts -n alpha
+```
+
+List generated alerts:
+
+```bash
+oc get prometheusrule demo-postgres-slo-alerts -n alpha \
+  -o jsonpath='{range .spec.groups[*].rules[*]}{.alert}{" | "}{.labels.sli}{" | "}{.labels.slo}{" | "}{.labels.severity}{"\n"}{end}'
+```
+
+Expected alerts:
+
+```text
+PGGuardianPostgresAvailabilitySLOBreach_DEMO_POSTGRES | postgres_availability | 99.9_percent_availability | critical
+PGGuardianBackupFreshnessSLOBreach_DEMO_POSTGRES | backup_freshness | successful_backup_within_24h | warning
+PGGuardianBackupJobFailed_DEMO_POSTGRES | backup_success | backup_jobs_must_succeed | warning
+PGGuardianPgBouncerAvailabilitySLOBreach_DEMO_POSTGRES | pgbouncer_availability | pooler_must_be_available | warning
+```
+
+---
+
+## PgBouncer
+
+PgBouncer is managed by the operator when enabled in the custom resource.
+
+Check PgBouncer resources:
+
+```bash
+oc get deploy,svc,configmap -n alpha | grep pgbouncer
+```
+
+Check status:
+
+```bash
+oc get postgresqlcluster demo-postgres -n alpha \
+  -o jsonpath='{.status.pgBouncerPhase}{"\n"}'
+```
+
+Expected:
+
+```text
+Available
+```
+
+---
+
+## OLM Installation
+
+The operator is packaged and installed through Operator Lifecycle Manager.
+
+Current CatalogSource:
+
+```text
+pg-guardian-catalog
+```
+
+Catalog namespace:
+
+```text
+openshift-marketplace
+```
+
+Install namespace:
 
 ```text
 pg-guardian-olm
 ```
 
----
-
-## Reconcile Idempotency
-
-The controller was improved to avoid repeatedly updating resources when no meaningful change exists.
-
-A stable pod template hash annotation is used to detect real pod template changes.
-
-This prevents unnecessary rolling updates for:
-
-* PostgreSQL StatefulSet
-* PgBouncer Deployment
-* Other managed workloads
-
----
-
-## High Availability
-
-High availability is enabled using:
-
-```yaml
-highAvailability:
-  enabled: true
-  replicas: 2
-  failoverMode: Automatic
-  detectionTimeoutSeconds: 30
-```
-
-When enabled, the operator creates:
-
-```text
-StatefulSet/sample-postgres
-StatefulSet/sample-postgres-standby
-```
-
-The standby pod is:
-
-```text
-sample-postgres-standby-0
-```
-
-The standby initializes itself from the primary using:
-
-```text
-pg_basebackup
-```
-
-Then it remains in streaming replication mode.
-
----
-
-## Streaming Replication
-
-The standby connects to the primary using the streaming replication user.
-
-The primary allows replication connections through `pg_hba.conf`.
-
-The allowed network CIDR is configured using:
-
-```yaml
-backup:
-  replicationAllowedCIDR: 10.128.0.0/14
-```
-
-This value should match the OpenShift pod network CIDR.
-
-Validation commands:
+Patch CatalogSource to the latest catalog image:
 
 ```bash
-oc exec -n alpha sample-postgres-standby-0 -- \
-  psql -U appuser -d appdb -Atqc "SELECT pg_is_in_recovery();"
+oc patch catalogsource pg-guardian-catalog \
+  -n openshift-marketplace \
+  --type merge \
+  -p '{"spec":{"image":"quay.io/iheb_mbarek/postgres-operator-catalog:v0.3.4"}}'
 ```
 
-Expected while standby is still standby:
-
-```text
-t
-```
-
-Primary replication validation:
+Check CatalogSource:
 
 ```bash
-oc exec -n alpha sample-postgres-0 -- \
-  psql -U appuser -d appdb -c "SELECT application_name, client_addr, state, sync_state FROM pg_stat_replication;"
+oc get catalogsource pg-guardian-catalog -n openshift-marketplace
+```
+
+Check CSV:
+
+```bash
+oc get csv -n pg-guardian-olm | grep postgres-operator
 ```
 
 Expected:
 
 ```text
-walreceiver | standby pod IP | streaming | async
+postgres-operator.v0.3.4   PG Guardian operator   0.3.4   postgres-operator.v0.3.3   Succeeded
 ```
 
----
-
-## Automatic Failover
-
-Automatic failover is the main feature introduced in `v0.3.0`.
-
-The workflow is:
-
-1. Operator detects that the primary pod is unavailable.
-2. Operator starts a detection timeout.
-3. If the primary recovers before timeout, no promotion happens.
-4. If the timeout expires, the operator creates a promotion Job.
-5. The promotion Job runs `pg_promote()` against the standby.
-6. The standby exits recovery mode and becomes writable.
-7. The normal PostgreSQL service switches to the promoted standby.
-8. The old primary remains fenced at zero replicas.
-
-Promotion command:
-
-```sql
-SELECT pg_promote(true, 60);
-```
-
-Promotion job:
-
-```text
-Job/sample-postgres-promote-standby
-```
-
----
-
-## Old Primary Fencing
-
-After failover, the original primary is intentionally kept stopped.
-
-Example final state:
-
-```text
-sample-postgres           0/0
-sample-postgres-standby   1/1
-```
-
-This avoids split-brain, where two PostgreSQL instances could both accept writes independently.
-
-The old primary is not automatically restarted.
-
-Old primary rejoin is intentionally manual and must be done safely by rebuilding or restoring it from the promoted primary.
-
----
-
-## Service Switch After Failover
-
-Before failover, the normal PostgreSQL service selects the primary:
-
-```yaml
-selector:
-  app: sample-postgres
-  app.kubernetes.io/component: postgres
-  managed: postgres-operator
-```
-
-After automatic failover, the operator switches the service to the promoted standby:
-
-```yaml
-selector:
-  app: sample-postgres
-  app.kubernetes.io/component: postgres-standby
-  database.iheb.local/role: standby
-  managed: postgres-operator
-```
-
-This allows applications to continue using the normal service name:
-
-```text
-sample-postgres
-```
-
-After promotion, this service points to the promoted standby.
-
----
-
-## Final Automatic Failover Proof
-
-The final verified state was:
-
-```text
-Primary StatefulSet: sample-postgres 0/0
-Standby StatefulSet: sample-postgres-standby 1/1
-Service endpoint: sample-postgres -> promoted standby IP
-Failover phase: Promoted
-HA phase: FailoverPromoted
-```
-
-Database proof:
-
-```sql
-SELECT pg_is_in_recovery();
-```
-
-Expected after promotion:
-
-```text
-f
-```
-
-Write proof:
-
-```sql
-INSERT INTO failover_test(note)
-VALUES ('managed service switched to promoted standby');
-
-SELECT count(*) FROM failover_test;
-```
-
-Expected:
-
-```text
-2
-```
-
----
-
-## OLM Packaging
-
-The operator is packaged for OpenShift Operator Lifecycle Manager.
-
-Main OLM artifacts:
-
-```text
-bundle/
-catalog/
-bundle.Dockerfile
-catalog.Dockerfile
-```
-
-The final OLM release uses:
-
-```text
-Operator image: quay.io/iheb_mbarek/postgres-operator:v0.3.0
-Bundle image:   quay.io/iheb_mbarek/postgres-operator-bundle:v0.3.0
-Catalog image:  quay.io/iheb_mbarek/postgres-operator-catalog:v0.3.3
-```
-
-The catalog exposes:
-
-```text
-stable -> postgres-operator.v0.3.0
-```
-
-The upgrade edge is:
-
-```text
-postgres-operator.v0.3.0 replaces postgres-operator.v0.2.5
-```
-
----
-
-## OLM Installation / Upgrade
-
-CatalogSource example:
-
-```yaml
-apiVersion: operators.coreos.com/v1alpha1
-kind: CatalogSource
-metadata:
-  name: pg-guardian-catalog
-  namespace: openshift-marketplace
-spec:
-  sourceType: grpc
-  image: quay.io/iheb_mbarek/postgres-operator-catalog:v0.3.3
-  displayName: PG Guardian Catalog
-  publisher: ihebmbarek
-```
-
-Subscription example:
-
-```yaml
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: postgres-operator
-  namespace: pg-guardian-olm
-spec:
-  channel: stable
-  name: postgres-operator
-  source: pg-guardian-catalog
-  sourceNamespace: openshift-marketplace
-  installPlanApproval: Automatic
-```
-
-Final verified OLM state:
-
-```text
-CSV: postgres-operator.v0.3.0
-Phase: Succeeded
-Deployment image: quay.io/iheb_mbarek/postgres-operator:v0.3.0
-Controller pod: Running
-```
-
----
-
-## Build and Push Operator Image
+Check running operator image:
 
 ```bash
-export IMG=quay.io/iheb_mbarek/postgres-operator:v0.3.0
-
-podman build -t $IMG .
-
-podman push $IMG
-```
-
----
-
-## Build and Push Bundle Image
-
-```bash
-export VERSION=0.3.0
-export IMG=quay.io/iheb_mbarek/postgres-operator:v0.3.0
-export BUNDLE_IMG=quay.io/iheb_mbarek/postgres-operator-bundle:v0.3.0
-
-make bundle IMG=$IMG VERSION=$VERSION
-
-podman build -f bundle.Dockerfile -t $BUNDLE_IMG .
-
-podman push $BUNDLE_IMG
-```
-
----
-
-## Build and Push Catalog Image
-
-```bash
-export CATALOG_IMG=quay.io/iheb_mbarek/postgres-operator-catalog:v0.3.3
-
-podman build -f catalog.Dockerfile -t $CATALOG_IMG .
-
-podman push $CATALOG_IMG
-```
-
----
-
-## Important Verification Commands
-
-Check PostgreSQLCluster status:
-
-```bash
-oc get postgresqlcluster sample-postgres -n alpha
-```
-
-Check HA status:
-
-```bash
-oc get postgresqlcluster sample-postgres -n alpha \
-  -o jsonpath='{.status.haPhase}{" | "}{.status.failoverPhase}{" | "}{.status.failoverReason}{"\n"}'
-```
-
-Check workloads:
-
-```bash
-oc get statefulset sample-postgres sample-postgres-standby -n alpha
-oc get pods -n alpha | grep sample-postgres
-```
-
-Check service selector:
-
-```bash
-oc get svc sample-postgres -n alpha -o yaml | sed -n '/selector:/,/ports:/p'
-```
-
-Check service endpoint:
-
-```bash
-oc get endpoints sample-postgres -n alpha -o wide
-```
-
-Check OLM CSV:
-
-```bash
-oc get csv -n pg-guardian-olm
-```
-
-Check deployed operator image:
-
-```bash
-oc get deployment postgres-operator-controller-manager \
+oc get deploy postgres-operator-controller-manager \
   -n pg-guardian-olm \
-  -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+  -o jsonpath='{.spec.template.spec.containers[*].image}{"\n"}'
 ```
 
----
-
-## Release History
-
-| Version         | Main Content                                                                     |
-| --------------- | -------------------------------------------------------------------------------- |
-| v0.1.0          | Initial OLM packaging                                                            |
-| v0.2.0 - v0.2.5 | Backup, monitoring, PgBouncer, security, OLM improvements                        |
-| v0.3.0          | Real standby, automatic failover, promotion, service switch, old primary fencing |
-| catalog v0.3.3  | Fixed stable channel and upgrade edge for OLM upgrade to v0.3.0                  |
-
-Important commits:
+Expected:
 
 ```text
-e5cfc49 Add standby StatefulSet for HA replication
-af72c15 Add automatic standby promotion and service switch
-2f6e9de Add post-failover fencing guard
-2a35ea8 Document automatic failover workflow
-75a7818 Merge automatic failover feature
-9f405ec Release OLM bundle and catalog v0.3.0
-9cb4f16 Fix catalog image serve command
+quay.io/iheb_mbarek/postgres-operator:v0.3.4
 ```
 
 ---
 
-## Current Limitations
+## Useful Verification Commands
 
-The current project is complete for demonstration and final-year project purposes, but the following limitations remain:
+Check operators:
 
-* Only one standby is promoted.
-* Automatic old-primary rejoin is not implemented.
-* After failover, rebuilding a new standby is manual.
-* Multi-standby leader selection is not implemented.
-* Synchronous replication is not implemented.
-* Advanced backup retention policies are managed mainly through Barman.
-* Production-grade disaster recovery would require additional automation and operational procedures.
+```bash
+oc get deploy -A | grep -E "postgres-operator|pg-guardian"
+```
+
+Expected production-like state:
+
+```text
+pg-guardian-olm            postgres-operator-controller-manager   1/1
+postgres-operator-system   postgres-operator-controller-manager   0/0
+```
+
+Check PostgreSQLCluster:
+
+```bash
+oc get postgresqlcluster -n alpha
+```
+
+Check full custom resource status:
+
+```bash
+oc get postgresqlcluster demo-postgres -n alpha -o yaml
+```
+
+Check CIS compliance:
+
+```bash
+oc get postgresqlcluster demo-postgres -n alpha \
+  -o jsonpath='{.status.compliancePhase}{"\n"}{.status.complianceScore}{"\n"}'
+```
+
+Check SLO rule:
+
+```bash
+oc get prometheusrule demo-postgres-slo-alerts -n alpha
+```
+
+Check OLM RBAC for PrometheusRule:
+
+```bash
+oc auth can-i create prometheusrules.monitoring.coreos.com \
+  --as=system:serviceaccount:pg-guardian-olm:postgres-operator-controller-manager \
+  -n alpha
+```
+
+Expected:
+
+```text
+yes
+```
+
+---
+
+## Proofs
+
+The repository contains proof files collected during development and OLM validation.
+
+Important proof directories:
+
+```text
+proofs/cis-compliance-v1/
+proofs/olm-v0.3.3-cis/
+proofs/slo-sli-v1/
+proofs/olm-v0.3.4-slo-sli/
+```
+
+These proofs include:
+
+* custom resource status
+* CIS findings
+* SLO/SLI PrometheusRule YAML
+* OLM CatalogSource state
+* OLM Subscription state
+* ClusterServiceVersion state
+* operator Deployment YAML
+* RBAC validation
+* final OLM upgrade validation
+
+---
+
+## Project Status
+
+Completed:
+
+* PostgreSQL Operator core reconciliation
+* PostgreSQL StatefulSet and service management
+* persistent storage management
+* credentials and configuration management
+* Barman backup integration
+* manual PITR validation workflow
+* PgBouncer deployment
+* PostgreSQL exporter monitoring
+* operator monitoring
+* TLS enforcement
+* CIS-aligned compliance status
+* SLO/SLI PrometheusRule generation
+* OLM packaging
+* OLM upgrade path up to `v0.3.4`
+
+Current validated release:
+
+```text
+v0.3.4
+```
+
+Current validated result:
+
+```text
+CIS: Passed 8/8
+SLO/SLI: demo-postgres-slo-alerts generated
+OLM: postgres-operator.v0.3.4 Succeeded
+```
 
 ---
 
@@ -944,59 +695,19 @@ The current project is complete for demonstration and final-year project purpose
 
 Possible future improvements:
 
-* Automatic rebuild of a new standby after failover
-* Safe old-primary rejoin workflow
-* Multiple standby support
-* Failover candidate selection
-* Synchronous replication option
-* Backup retention policy automation
-* Web dashboard for backup/failover status
-* Alertmanager integration
-* Automated restore CRD
+* fully automated PITR orchestration through `PostgreSQLRestore`
+* automatic failover and standby promotion
+* multi-replica PostgreSQL topology
+* advanced SLO burn-rate alerts
 * Grafana dashboards
-* Disaster recovery runbooks
+* backup retention policy management
+* disaster recovery automation
+* multi-namespace tenant management
+* admission webhooks for stronger validation
+* end-to-end test automation for OLM installation
 
 ---
 
-## Safety Notes
+## License
 
-After automatic failover, do not manually scale the old primary back to one replica unless it has been safely rebuilt.
-
-Unsafe command after failover:
-
-```bash
-oc scale statefulset sample-postgres -n alpha --replicas=1
-```
-
-This can cause split-brain.
-
-Correct behavior after failover:
-
-```text
-sample-postgres primary StatefulSet remains 0/0
-sample-postgres-standby remains 1/1
-sample-postgres service points to promoted standby
-```
-
----
-
-## Project Final State
-
-The PG Guardian Operator now provides an end-to-end PostgreSQL management solution for OpenShift:
-
-```text
-PostgreSQL lifecycle management: complete
-Backup and WAL archiving: complete
-Barman integration: complete
-Scheduled backups: complete
-PITR workflow: validated
-PgBouncer pooling: complete
-Monitoring and alerts: complete
-OpenShift security compatibility: complete
-OLM packaging and upgrade: complete
-Automatic failover: complete
-Service switch after promotion: complete
-Split-brain protection: complete
-```
-
-The operator is technically complete for the final project demonstration.
+This project was developed as part of a final-year engineering project.

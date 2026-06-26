@@ -62,6 +62,7 @@ type PostgreSQLClusterReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=database.iheb.local,resources=postgresqlclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=database.iheb.local,resources=postgresqlclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=database.iheb.local,resources=postgresqlclusters/finalizers,verbs=update
@@ -411,6 +412,10 @@ func (r *PostgreSQLClusterReconciler) Reconcile(
 	}
 
 	evaluateClusterCompliance(&cluster)
+
+	if err := r.reconcileSLOPrometheusRule(ctx, &cluster); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	if !reflect.DeepEqual(
 		originalStatus,

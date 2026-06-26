@@ -1,0 +1,104 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"annotations":{},"name":"postgres-operator-manager-role"},"rules":[{"apiGroups":[""],"resources":["configmaps","persistentvolumeclaims","secrets","services"],"verbs":["create","delete","get","list","patch","update","watch"]},{"apiGroups":[""],"resources":["pods"],"verbs":["get","list","watch"]},{"apiGroups":["apps"],"resources":["deployments","statefulsets"],"verbs":["create","delete","get","list","patch","update","watch"]},{"apiGroups":["batch"],"resources":["cronjobs","jobs"],"verbs":["create","delete","get","list","patch","update","watch"]},{"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups","postgresqlclusters","postgresqlrestores"],"verbs":["create","delete","get","list","patch","update","watch"]},{"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups/finalizers","postgresqlclusters/finalizers","postgresqlrestores/finalizers"],"verbs":["update"]},{"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups/status","postgresqlclusters/status","postgresqlrestores/status"],"verbs":["get","patch","update"]},{"apiGroups":["monitoring.coreos.com"],"resources":["prometheusrules"],"verbs":["create","delete","get","list","patch","update","watch"]}]}
+  creationTimestamp: "2026-06-08T15:05:41Z"
+  name: postgres-operator-manager-role
+  resourceVersion: "54760191"
+  uid: 11a8a2c7-fad7-464c-ad13-dd46edccff1d
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - persistentvolumeclaims
+  - secrets
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - cronjobs
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - database.iheb.local
+  resources:
+  - postgresqlbackups
+  - postgresqlclusters
+  - postgresqlrestores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - database.iheb.local
+  resources:
+  - postgresqlbackups/finalizers
+  - postgresqlclusters/finalizers
+  - postgresqlrestores/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - database.iheb.local
+  resources:
+  - postgresqlbackups/status
+  - postgresqlclusters/status
+  - postgresqlrestores/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - prometheusrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

@@ -1,0 +1,4 @@
+PGGuardianPostgresAvailabilitySLOBreach_DEMO_POSTGRES | postgres_availability | 99.9_percent_availability | critical
+PGGuardianBackupFreshnessSLOBreach_DEMO_POSTGRES | backup_freshness | successful_backup_within_24h | warning
+PGGuardianBackupJobFailed_DEMO_POSTGRES | backup_success | backup_jobs_must_succeed | warning
+PGGuardianPgBouncerAvailabilitySLOBreach_DEMO_POSTGRES | pgbouncer_availability | pooler_must_be_available | warning

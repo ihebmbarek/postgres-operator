@@ -10,3 +10,5 @@ entries:
   - name: postgres-operator.v0.3.1
   - name: postgres-operator.v0.3.2
     replaces: postgres-operator.v0.3.1
+  - name: postgres-operator.v0.3.3
+    replaces: postgres-operator.v0.3.2

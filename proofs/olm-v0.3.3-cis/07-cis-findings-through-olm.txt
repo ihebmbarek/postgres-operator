@@ -1,0 +1,10 @@
+Passed
+8/8
+CIS-PG-001 | Pass | high | PostgreSQL TLS must be enabled
+CIS-K8S-001 | Pass | high | Pod must run as non-root
+CIS-K8S-002 | Pass | critical | Privilege escalation must be disabled
+CIS-K8S-003 | Pass | critical | Containers must not run privileged
+CIS-K8S-004 | Pass | high | Linux capabilities must be dropped
+CIS-K8S-005 | Pass | medium | Seccomp RuntimeDefault must be used
+CIS-K8S-006 | Pass | medium | PostgreSQL container resources must be configured
+CIS-PG-002 | Pass | high | Database credentials must be stored in Kubernetes Secret

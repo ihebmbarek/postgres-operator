@@ -1,0 +1,222 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: "7"
+  creationTimestamp: "2026-06-15T16:27:03Z"
+  generation: 180
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: postgres-operator
+    control-plane: controller-manager
+    olm.deployment-spec-hash: 2zX9vic0bhRiqwtrYpeHQbQ0Rtu6HSq0BRpwDx
+    olm.managed: "true"
+    olm.owner: postgres-operator.v0.3.3
+    olm.owner.kind: ClusterServiceVersion
+    olm.owner.namespace: pg-guardian-olm
+    operators.coreos.com/postgres-operator.pg-guardian-olm: ""
+  name: postgres-operator-controller-manager
+  namespace: pg-guardian-olm
+  ownerReferences:
+  - apiVersion: operators.coreos.com/v1alpha1
+    blockOwnerDeletion: false
+    controller: false
+    kind: ClusterServiceVersion
+    name: postgres-operator.v0.3.3
+    uid: c28cc7f5-dbdc-40d7-a649-b56a79e6d2d4
+  resourceVersion: "54714794"
+  uid: 1a13e4ba-e210-4f42-91c1-a4229e0889cd
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-operator
+      control-plane: controller-manager
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        alm-examples: |-
+          [
+            {
+              "apiVersion": "database.iheb.local/v1",
+              "kind": "PostgreSQLBackup",
+              "metadata": {
+                "labels": {
+                  "app.kubernetes.io/managed-by": "kustomize",
+                  "app.kubernetes.io/name": "postgres-operator"
+                },
+                "name": "postgresqlbackup-sample"
+              },
+              "spec": null
+            },
+            {
+              "apiVersion": "database.iheb.local/v1",
+              "kind": "PostgreSQLCluster",
+              "metadata": {
+                "labels": {
+                  "app.kubernetes.io/managed-by": "kustomize",
+                  "app.kubernetes.io/name": "postgres-operator"
+                },
+                "name": "sample-postgres"
+              },
+              "spec": {
+                "backup": {
+                  "archiveTimeout": 60,
+                  "backupImage": "quay.io/iheb_mbarek/postgres-barman:latest",
+                  "barmanHost": "192.168.180.54",
+                  "barmanServerName": "sample-postgres",
+                  "barmanUser": "barman",
+                  "enabled": true,
+                  "exposeService": true,
+                  "nodePort": 30433,
+                  "replicationAllowedCIDR": "192.168.180.54/32",
+                  "schedule": "0 2 * * *",
+                  "sshSecretName": "barman-ssh-key",
+                  "streamingUser": "streaming_barman",
+                  "suspendScheduledBackups": false
+                },
+                "cpuLimit": "500m",
+                "cpuRequest": "250m",
+                "database": "appdb",
+                "highAvailability": {
+                  "detectionTimeoutSeconds": 60,
+                  "enabled": true,
+                  "failoverMode": "Manual",
+                  "replicas": 2
+                },
+                "image": "quay.io/iheb_mbarek/postgres-barman:latest",
+                "memoryLimit": "512Mi",
+                "memoryRequest": "256Mi",
+                "pgbouncer": {
+                  "defaultPoolSize": 20,
+                  "enabled": true,
+                  "image": "docker.io/edoburu/pgbouncer:latest",
+                  "maxClientConn": 100,
+                  "poolMode": "transaction",
+                  "replicas": 1
+                },
+                "postgresVersion": "16",
+                "restore": {
+                  "enabled": false
+                },
+                "storageClassName": "nfs-client",
+                "storageSize": "5Gi",
+                "tls": {
+                  "enabled": true,
+                  "requireClientCert": false,
+                  "secretName": "demo-postgres-tls",
+                  "sslMode": "require"
+                },
+                "user": "appuser"
+              }
+            },
+            {
+              "apiVersion": "database.iheb.local/v1",
+              "kind": "PostgreSQLRestore",
+              "metadata": {
+                "labels": {
+                  "app.kubernetes.io/managed-by": "kustomize",
+                  "app.kubernetes.io/name": "postgres-operator"
+                },
+                "name": "postgresqlrestore-sample"
+              },
+              "spec": null
+            }
+          ]
+        capabilities: Basic Install
+        createdAt: "2026-06-26T14:41:22Z"
+        kubectl.kubernetes.io/default-container: manager
+        olm.operatorGroup: pg-guardian-operatorgroup
+        olm.operatorNamespace: pg-guardian-olm
+        olm.targetNamespaces: ""
+        operatorframework.io/properties: '{"properties":[{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLBackup","version":"v1"}},{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLCluster","version":"v1"}},{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLRestore","version":"v1"}},{"type":"olm.package","value":{"packageName":"postgres-operator","version":"0.3.3"}}]}'
+        operators.operatorframework.io/builder: operator-sdk-v1.40.0
+        operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+      labels:
+        app.kubernetes.io/name: postgres-operator
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        command:
+        - /manager
+        env:
+        - name: OPERATOR_CONDITION_NAME
+          value: postgres-operator.v0.3.3
+        image: quay.io/iheb_mbarek/postgres-operator:v0.3.3
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: manager
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /readyz
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccount: postgres-operator-controller-manager
+      serviceAccountName: postgres-operator-controller-manager
+      terminationGracePeriodSeconds: 10
+status:
+  availableReplicas: 1
+  conditions:
+  - lastTransitionTime: "2026-06-26T14:47:57Z"
+    lastUpdateTime: "2026-06-26T14:47:57Z"
+    message: Deployment has minimum availability.
+    reason: MinimumReplicasAvailable
+    status: "True"
+    type: Available
+  - lastTransitionTime: "2026-06-16T16:38:20Z"
+    lastUpdateTime: "2026-06-26T14:47:57Z"
+    message: ReplicaSet "postgres-operator-controller-manager-85657c85b4" has successfully
+      progressed.
+    reason: NewReplicaSetAvailable
+    status: "True"
+    type: Progressing
+  observedGeneration: 180
+  readyReplicas: 1
+  replicas: 1
+  updatedReplicas: 1

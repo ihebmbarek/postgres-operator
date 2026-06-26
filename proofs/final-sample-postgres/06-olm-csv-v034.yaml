@@ -1,0 +1,531 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "database.iheb.local/v1",
+          "kind": "PostgreSQLBackup",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "postgres-operator"
+            },
+            "name": "postgresqlbackup-sample"
+          },
+          "spec": null
+        },
+        {
+          "apiVersion": "database.iheb.local/v1",
+          "kind": "PostgreSQLCluster",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "postgres-operator"
+            },
+            "name": "sample-postgres"
+          },
+          "spec": {
+            "backup": {
+              "archiveTimeout": 60,
+              "backupImage": "quay.io/iheb_mbarek/postgres-barman:latest",
+              "barmanHost": "192.168.180.54",
+              "barmanServerName": "sample-postgres",
+              "barmanUser": "barman",
+              "enabled": true,
+              "exposeService": true,
+              "nodePort": 30433,
+              "replicationAllowedCIDR": "192.168.180.54/32",
+              "schedule": "0 2 * * *",
+              "sshSecretName": "barman-ssh-key",
+              "streamingUser": "streaming_barman",
+              "suspendScheduledBackups": false
+            },
+            "cpuLimit": "500m",
+            "cpuRequest": "250m",
+            "database": "appdb",
+            "highAvailability": {
+              "detectionTimeoutSeconds": 60,
+              "enabled": true,
+              "failoverMode": "Manual",
+              "replicas": 2
+            },
+            "image": "quay.io/iheb_mbarek/postgres-barman:latest",
+            "memoryLimit": "512Mi",
+            "memoryRequest": "256Mi",
+            "pgbouncer": {
+              "defaultPoolSize": 20,
+              "enabled": true,
+              "image": "docker.io/edoburu/pgbouncer:latest",
+              "maxClientConn": 100,
+              "poolMode": "transaction",
+              "replicas": 1
+            },
+            "postgresVersion": "16",
+            "restore": {
+              "enabled": false
+            },
+            "storageClassName": "nfs-client",
+            "storageSize": "5Gi",
+            "tls": {
+              "enabled": true,
+              "requireClientCert": false,
+              "secretName": "demo-postgres-tls",
+              "sslMode": "require"
+            },
+            "user": "appuser"
+          }
+        },
+        {
+          "apiVersion": "database.iheb.local/v1",
+          "kind": "PostgreSQLRestore",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "postgres-operator"
+            },
+            "name": "postgresqlrestore-sample"
+          },
+          "spec": null
+        }
+      ]
+    capabilities: Basic Install
+    createdAt: "2026-06-26T15:46:39Z"
+    olm.operatorGroup: pg-guardian-operatorgroup
+    olm.operatorNamespace: pg-guardian-olm
+    olm.targetNamespaces: ""
+    operatorframework.io/properties: '{"properties":[{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLBackup","version":"v1"}},{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLCluster","version":"v1"}},{"type":"olm.gvk","value":{"group":"database.iheb.local","kind":"PostgreSQLRestore","version":"v1"}},{"type":"olm.package","value":{"packageName":"postgres-operator","version":"0.3.4"}}]}'
+    operators.operatorframework.io/builder: operator-sdk-v1.40.0
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+  creationTimestamp: "2026-06-26T15:51:13Z"
+  finalizers:
+  - operators.coreos.com/csv-cleanup
+  generation: 1
+  labels:
+    olm.managed: "true"
+    operators.coreos.com/postgres-operator.pg-guardian-olm: ""
+  name: postgres-operator.v0.3.4
+  namespace: pg-guardian-olm
+  resourceVersion: "54826170"
+  uid: 008ea970-2026-4db9-b198-b6e847f65dce
+spec:
+  apiservicedefinitions: {}
+  cleanup:
+    enabled: false
+  customresourcedefinitions:
+    owned:
+    - description: PostgreSQLBackup is the Schema for the postgresqlbackups API
+      displayName: Postgre SQLBackup
+      kind: PostgreSQLBackup
+      name: postgresqlbackups.database.iheb.local
+      version: v1
+    - description: PostgreSQLCluster is the Schema for the postgresqlclusters API.
+      displayName: Postgre SQLCluster
+      kind: PostgreSQLCluster
+      name: postgresqlclusters.database.iheb.local
+      version: v1
+    - description: PostgreSQLRestore is the Schema for the postgresqlrestores API
+      displayName: Postgre SQLRestore
+      kind: PostgreSQLRestore
+      name: postgresqlrestores.database.iheb.local
+      version: v1
+  description: PG Guardian is a PostgreSQL Operator for OpenShift that automates PostgreSQL
+    deployment, persistent storage, Barman backup integration, scheduled backups,
+    Point-in-Time Recovery, PgBouncer connection pooling, and OpenShift monitoring
+    and alerting.
+  displayName: PG Guardian operator
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          - persistentvolumeclaims
+          - secrets
+          - services
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - pods
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - apps
+          resources:
+          - deployments
+          - statefulsets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - batch
+          resources:
+          - cronjobs
+          - jobs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - database.iheb.local
+          resources:
+          - postgresqlbackups
+          - postgresqlclusters
+          - postgresqlrestores
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - database.iheb.local
+          resources:
+          - postgresqlbackups/finalizers
+          - postgresqlclusters/finalizers
+          - postgresqlrestores/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - database.iheb.local
+          resources:
+          - postgresqlbackups/status
+          - postgresqlclusters/status
+          - postgresqlrestores/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - prometheusrules
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: postgres-operator-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: postgres-operator
+          control-plane: controller-manager
+        name: postgres-operator-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: postgres-operator
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                app.kubernetes.io/name: postgres-operator
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --metrics-bind-address=:8443
+                - --leader-elect
+                - --health-probe-bind-address=:8081
+                command:
+                - /manager
+                image: quay.io/iheb_mbarek/postgres-operator:v0.3.4
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: postgres-operator-controller-manager
+              terminationGracePeriodSeconds: 10
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        serviceAccountName: postgres-operator-controller-manager
+    strategy: deployment
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - postgresql
+  - operator
+  - openshift
+  - kubernetes
+  - database
+  - backup
+  - recovery
+  - pitr
+  - barman
+  - pgbouncer
+  - monitoring
+  - prometheus
+  links:
+  - name: Postgres Operator
+    url: https://postgres-operator.domain
+  maturity: alpha
+  provider:
+    name: Iheb Mbarek
+    url: https://github.com/ihebmbarek/postgres-operator
+  replaces: postgres-operator.v0.3.3
+  version: 0.3.4
+status:
+  cleanup: {}
+  conditions:
+  - lastTransitionTime: "2026-06-26T15:51:14Z"
+    lastUpdateTime: "2026-06-26T15:51:14Z"
+    message: requirements not yet checked
+    phase: Pending
+    reason: RequirementsUnknown
+  - lastTransitionTime: "2026-06-26T15:51:14Z"
+    lastUpdateTime: "2026-06-26T15:51:14Z"
+    message: one or more requirements couldn't be found
+    phase: Pending
+    reason: RequirementsNotMet
+  - lastTransitionTime: "2026-06-26T15:51:22Z"
+    lastUpdateTime: "2026-06-26T15:51:22Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2026-06-26T15:51:22Z"
+    lastUpdateTime: "2026-06-26T15:51:22Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2026-06-26T15:51:22Z"
+    lastUpdateTime: "2026-06-26T15:51:23Z"
+    message: 'installing: waiting for deployment postgres-operator-controller-manager
+      to become ready: deployment "postgres-operator-controller-manager" not available:
+      Deployment does not have minimum availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2026-06-26T15:51:59Z"
+    lastUpdateTime: "2026-06-26T15:51:59Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  - lastTransitionTime: "2026-06-26T16:21:05Z"
+    lastUpdateTime: "2026-06-26T16:21:05Z"
+    message: 'installing: waiting for deployment postgres-operator-controller-manager
+      to become ready: deployment "postgres-operator-controller-manager" not available:
+      Deployment does not have minimum availability.'
+    phase: Failed
+    reason: ComponentUnhealthy
+  - lastTransitionTime: "2026-06-26T16:21:05Z"
+    lastUpdateTime: "2026-06-26T16:21:05Z"
+    message: 'installing: waiting for deployment postgres-operator-controller-manager
+      to become ready: deployment "postgres-operator-controller-manager" not available:
+      Deployment does not have minimum availability.'
+    phase: Pending
+    reason: NeedsReinstall
+  - lastTransitionTime: "2026-06-26T16:21:06Z"
+    lastUpdateTime: "2026-06-26T16:21:06Z"
+    message: all requirements found, attempting install
+    phase: InstallReady
+    reason: AllRequirementsMet
+  - lastTransitionTime: "2026-06-26T16:21:07Z"
+    lastUpdateTime: "2026-06-26T16:21:07Z"
+    message: waiting for install components to report healthy
+    phase: Installing
+    reason: InstallSucceeded
+  - lastTransitionTime: "2026-06-26T16:21:07Z"
+    lastUpdateTime: "2026-06-26T16:21:08Z"
+    message: 'installing: waiting for deployment postgres-operator-controller-manager
+      to become ready: deployment "postgres-operator-controller-manager" not available:
+      Deployment does not have minimum availability.'
+    phase: Installing
+    reason: InstallWaiting
+  - lastTransitionTime: "2026-06-26T16:21:18Z"
+    lastUpdateTime: "2026-06-26T16:21:18Z"
+    message: install strategy completed with no errors
+    phase: Succeeded
+    reason: InstallSucceeded
+  lastTransitionTime: "2026-06-26T16:21:18Z"
+  lastUpdateTime: "2026-06-26T16:21:18Z"
+  message: install strategy completed with no errors
+  phase: Succeeded
+  reason: InstallSucceeded
+  requirementStatus:
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: postgresqlbackups.database.iheb.local
+    status: Present
+    uuid: 1b02d8c3-78d2-41fb-a51b-32a2325bd56f
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: postgresqlclusters.database.iheb.local
+    status: Present
+    uuid: 9da29eb9-6b98-41d5-866f-4314a857d0c4
+    version: v1
+  - group: apiextensions.k8s.io
+    kind: CustomResourceDefinition
+    message: CRD is present and Established condition is true
+    name: postgresqlrestores.database.iheb.local
+    status: Present
+    uuid: a7bd4dad-6d30-45b7-b001-338576cd78c8
+    version: v1
+  - dependents:
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":[""],"resources":["configmaps","persistentvolumeclaims","secrets","services"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","list","watch"],"apiGroups":[""],"resources":["pods"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["apps"],"resources":["deployments","statefulsets"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["batch"],"resources":["cronjobs","jobs"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups","postgresqlclusters","postgresqlrestores"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["update"],"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups/finalizers","postgresqlclusters/finalizers","postgresqlrestores/finalizers"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["get","patch","update"],"apiGroups":["database.iheb.local"],"resources":["postgresqlbackups/status","postgresqlclusters/status","postgresqlrestores/status"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create","delete","get","list","patch","update","watch"],"apiGroups":["monitoring.coreos.com"],"resources":["prometheusrules"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create"],"apiGroups":["authentication.k8s.io"],"resources":["tokenreviews"]}
+      status: Satisfied
+      version: v1
+    - group: rbac.authorization.k8s.io
+      kind: PolicyRule
+      message: cluster rule:{"verbs":["create"],"apiGroups":["authorization.k8s.io"],"resources":["subjectaccessreviews"]}
+      status: Satisfied
+      version: v1
+    group: ""
+    kind: ServiceAccount
+    message: ""
+    name: postgres-operator-controller-manager
+    status: Present
+    version: v1

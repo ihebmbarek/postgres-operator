@@ -1,0 +1,7 @@
+===== CSV =====
+NAME                       DISPLAY                VERSION   REPLACES                   PHASE
+postgres-operator.v0.3.4   PG Guardian operator   0.3.4     postgres-operator.v0.3.3   Succeeded
+===== IMAGE =====
+quay.io/iheb_mbarek/postgres-operator:v0.3.4
+===== RBAC PROMETHEUSRULE =====
+yes

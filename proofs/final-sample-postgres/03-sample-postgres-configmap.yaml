@@ -1,0 +1,41 @@
+apiVersion: v1
+data:
+  custom.conf: |
+    listen_addresses = '*'
+    hba_file = '/etc/postgresql/pg_hba.conf'
+    ssl = on
+    ssl_cert_file = '/etc/postgresql/tls/server.crt'
+    ssl_key_file = '/etc/postgresql/tls/server.key'
+    ssl_ca_file = '/etc/postgresql/tls/ca.crt'
+    password_encryption = 'scram-sha-256'
+    wal_level = replica
+    archive_mode = on
+    max_wal_senders = 5
+    archive_timeout = 60
+    archive_command = 'PATH=/etc/barman-ssh:$PATH barman-wal-archive -U barman 192.168.180.54 sample-postgres %p'
+  pg_hba.conf: |
+    # Managed by postgres-operator. Do not edit manually.
+    local   all             all                                     trust
+    hostssl      all             all             127.0.0.1/32            scram-sha-256
+    hostssl      all             all             ::1/128                 scram-sha-256
+    hostssl      all             all             0.0.0.0/0               scram-sha-256
+    hostssl      all             all             ::/0                    scram-sha-256
+
+    hostssl      replication     streaming_barman    192.168.180.54/32    scram-sha-256
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2026-06-01T18:15:57Z"
+  labels:
+    app: sample-postgres
+    managed: postgres-operator
+  name: sample-postgres-config
+  namespace: alpha
+  ownerReferences:
+  - apiVersion: database.iheb.local/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: PostgreSQLCluster
+    name: sample-postgres
+    uid: 7b0a0db1-90d3-48c3-b485-5f558e2aa7b1
+  resourceVersion: "54874855"
+  uid: d0d040e5-09f1-4043-8b0e-1a9efdc97989

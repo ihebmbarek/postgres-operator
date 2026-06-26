@@ -1,0 +1,4 @@
+PGGuardianPostgresAvailabilitySLOBreach_SAMPLE_POSTGRES | postgres_availability | 99.9_percent_availability | critical | avg_over_time(pg_up{namespace="alpha",service="sample-postgres-exporter"}[5m]) < 0.999
+PGGuardianBackupFreshnessSLOBreach_SAMPLE_POSTGRES | backup_freshness | successful_backup_within_24h | warning | (time() - kube_cronjob_status_last_successful_time{namespace="alpha",cronjob="sample-postgres-barman-backup"}) > 86400
+PGGuardianBackupJobFailed_SAMPLE_POSTGRES | backup_success | backup_jobs_must_succeed | warning | kube_job_status_failed{namespace="alpha",job_name=~"sample-postgres-barman-backup-.*"} > 0
+PGGuardianPgBouncerAvailabilitySLOBreach_SAMPLE_POSTGRES | pgbouncer_availability | pooler_must_be_available | warning | kube_deployment_status_replicas_available{namespace="alpha",deployment="sample-postgres-pgbouncer"} < 1

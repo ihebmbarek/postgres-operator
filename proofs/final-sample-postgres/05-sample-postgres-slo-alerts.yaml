@@ -1,0 +1,88 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  annotations:
+    pg-guardian.io/slo-description: Operator-generated SLO/SLI Prometheus alerts for
+      PostgreSQL workload reliability.
+  creationTimestamp: "2026-06-26T15:32:56Z"
+  generation: 1
+  labels:
+    app: sample-postgres
+    app.kubernetes.io/component: slo-alerts
+    app.kubernetes.io/managed-by: postgres-operator
+    app.kubernetes.io/name: sample-postgres
+    pg-guardian.io/sre: slo-sli
+  name: sample-postgres-slo-alerts
+  namespace: alpha
+  ownerReferences:
+  - apiVersion: database.iheb.local/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: PostgreSQLCluster
+    name: sample-postgres
+    uid: 7b0a0db1-90d3-48c3-b485-5f558e2aa7b1
+  resourceVersion: "54761542"
+  uid: 5053b020-fef6-4243-9711-6173b5ce2619
+spec:
+  groups:
+  - name: pg-guardian.sample-postgres.slo.rules
+    rules:
+    - alert: PGGuardianPostgresAvailabilitySLOBreach_SAMPLE_POSTGRES
+      annotations:
+        description: PostgreSQL availability for cluster sample-postgres is below
+          the 99.9% SLO over the last 5 minutes.
+        summary: PostgreSQL availability SLO breach
+      expr: avg_over_time(pg_up{namespace="alpha",service="sample-postgres-exporter"}[5m])
+        < 0.999
+      for: 2m
+      labels:
+        component: database
+        namespace: alpha
+        severity: critical
+        sli: postgres_availability
+        slo: 99.9_percent_availability
+        slo_target: "99.9"
+    - alert: PGGuardianBackupFreshnessSLOBreach_SAMPLE_POSTGRES
+      annotations:
+        description: No successful Barman backup for PostgreSQL cluster sample-postgres
+          has been observed within the last 24 hours.
+        summary: Backup freshness SLO breach
+      expr: (time() - kube_cronjob_status_last_successful_time{namespace="alpha",cronjob="sample-postgres-barman-backup"})
+        > 86400
+      for: 5m
+      labels:
+        component: backup
+        namespace: alpha
+        severity: warning
+        sli: backup_freshness
+        slo: successful_backup_within_24h
+        slo_target: 24h
+    - alert: PGGuardianBackupJobFailed_SAMPLE_POSTGRES
+      annotations:
+        description: At least one Barman backup job for PostgreSQL cluster sample-postgres
+          failed.
+        summary: Backup job failed
+      expr: kube_job_status_failed{namespace="alpha",job_name=~"sample-postgres-barman-backup-.*"}
+        > 0
+      for: 1m
+      labels:
+        component: backup
+        namespace: alpha
+        severity: warning
+        sli: backup_success
+        slo: backup_jobs_must_succeed
+    - alert: PGGuardianPgBouncerAvailabilitySLOBreach_SAMPLE_POSTGRES
+      annotations:
+        description: PgBouncer for PostgreSQL cluster sample-postgres has no available
+          replicas.
+        summary: PgBouncer availability SLO breach
+      expr: kube_deployment_status_replicas_available{namespace="alpha",deployment="sample-postgres-pgbouncer"}
+        < 1
+      for: 2m
+      labels:
+        component: pgbouncer
+        namespace: alpha
+        severity: warning
+        sli: pgbouncer_availability
+        slo: pooler_must_be_available
+        slo_target: at_least_1_available_replica

@@ -1,0 +1,148 @@
+apiVersion: database.iheb.local/v1
+kind: PostgreSQLCluster
+metadata:
+  annotations:
+    database.iheb.local/reconcile-at: "1782492552"
+    finalImageTest: "1781450734"
+    finalRbacFixTest: "1781450935"
+    finalRbacPatchTest: "1781451205"
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"database.iheb.local/v1","kind":"PostgreSQLCluster","metadata":{"annotations":{},"labels":{"app.kubernetes.io/managed-by":"kustomize","app.kubernetes.io/name":"postgres-operator"},"name":"sample-postgres","namespace":"alpha"},"spec":{"backup":{"archiveTimeout":60,"backupImage":"quay.io/iheb_mbarek/postgres-barman:latest","barmanHost":"192.168.180.54","barmanServerName":"sample-postgres","barmanUser":"barman","enabled":true,"exposeService":true,"nodePort":30433,"replicationAllowedCIDR":"192.168.180.54/32","schedule":"0 2 * * *","sshSecretName":"barman-ssh-key","streamingUser":"streaming_barman","suspendScheduledBackups":false},"cpuLimit":"500m","cpuRequest":"250m","database":"appdb","highAvailability":{"detectionTimeoutSeconds":60,"enabled":true,"failoverMode":"Manual","replicas":2},"image":"quay.io/iheb_mbarek/postgres-barman:latest","memoryLimit":"512Mi","memoryRequest":"256Mi","pgbouncer":{"defaultPoolSize":20,"enabled":true,"image":"docker.io/edoburu/pgbouncer:latest","maxClientConn":100,"poolMode":"transaction","replicas":1},"postgresVersion":"16","restore":{"enabled":false},"storageClassName":"nfs-client","storageSize":"5Gi","tls":{"enabled":true,"requireClientCert":false,"secretName":"sample-postgres-tls","sslMode":"require"},"user":"appuser"}}
+    reconcileAt: 1781634693-hash-3
+    selectorFixTest: "1781460728"
+    selectorFixV022: "1781461220"
+    selectorFixV023: "1781462345"
+  creationTimestamp: "2026-05-26T13:30:19Z"
+  generation: 34
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: postgres-operator
+  name: sample-postgres
+  namespace: alpha
+  resourceVersion: "54875666"
+  uid: 7b0a0db1-90d3-48c3-b485-5f558e2aa7b1
+spec:
+  backup:
+    archiveTimeout: 60
+    backupImage: quay.io/iheb_mbarek/postgres-barman:latest
+    barmanHost: 192.168.180.54
+    barmanServerName: sample-postgres
+    barmanUser: barman
+    enabled: true
+    exposeService: true
+    nodePort: 30433
+    replicationAllowedCIDR: 192.168.180.54/32
+    schedule: 0 2 * * *
+    sshSecretName: barman-ssh-key
+    streamingUser: streaming_barman
+    suspendScheduledBackups: false
+  cpuLimit: 500m
+  cpuRequest: 250m
+  database: appdb
+  highAvailability:
+    detectionTimeoutSeconds: 60
+    enabled: true
+    failoverMode: Manual
+    replicas: 2
+  image: quay.io/iheb_mbarek/postgres-barman:latest
+  memoryLimit: 512Mi
+  memoryRequest: 256Mi
+  pgbouncer:
+    defaultPoolSize: 20
+    enabled: true
+    image: docker.io/edoburu/pgbouncer:latest
+    maxClientConn: 100
+    poolMode: transaction
+    replicas: 1
+  postgresVersion: "16"
+  restore:
+    backupId: 20260614T185602
+    confirmation: RESTORE sample-postgres
+    enabled: false
+    preserveExistingData: true
+    requestId: clean-pitr-proof-1781457246
+    targetAction: promote
+    targetTime: "2026-06-14T17:09:54.593Z"
+  storageClassName: nfs-client
+  storageSize: 5Gi
+  tls:
+    enabled: true
+    requireClientCert: false
+    secretName: sample-postgres-tls
+    sslMode: require
+  user: appuser
+status:
+  backupCronJob: sample-postgres-barman-backup
+  backupEnabled: true
+  backupPhase: Scheduled
+  backupSchedule: 0 2 * * *
+  barmanNodePort: 30433
+  barmanService: sample-postgres-barman
+  complianceFindings:
+  - id: CIS-PG-001
+    message: PostgreSQL must enforce encrypted client connections using a Kubernetes
+      TLS Secret.
+    severity: high
+    status: Pass
+    title: PostgreSQL TLS must be enabled
+  - id: CIS-K8S-001
+    message: Generated PostgreSQL workloads must set runAsNonRoot=true.
+    severity: high
+    status: Pass
+    title: Pod must run as non-root
+  - id: CIS-K8S-002
+    message: Generated containers must set allowPrivilegeEscalation=false.
+    severity: critical
+    status: Pass
+    title: Privilege escalation must be disabled
+  - id: CIS-K8S-003
+    message: Generated containers must set privileged=false.
+    severity: critical
+    status: Pass
+    title: Containers must not run privileged
+  - id: CIS-K8S-004
+    message: Generated containers must drop all Linux capabilities.
+    severity: high
+    status: Pass
+    title: Linux capabilities must be dropped
+  - id: CIS-K8S-005
+    message: Generated pods must use seccompProfile.type=RuntimeDefault.
+    severity: medium
+    status: Pass
+    title: Seccomp RuntimeDefault must be used
+  - id: CIS-K8S-006
+    message: PostgreSQL container must define CPU and memory requests and limits.
+    severity: medium
+    status: Pass
+    title: PostgreSQL container resources must be configured
+  - id: CIS-PG-002
+    message: The operator manages database credentials in Secret "sample-postgres-credentials".
+    severity: high
+    status: Pass
+    title: Database credentials must be stored in Kubernetes Secret
+  compliancePhase: Passed
+  complianceScore: 8/8
+  failoverPhase: Promoted
+  failoverReason: automatic failover is waiting because standby pod sample-postgres-standby-0
+    is not ready
+  haEnabled: true
+  haPhase: FailoverPromoted
+  lastBackupId: 20260617T060004
+  lastBackupStatus: DONE
+  lastBackupTime: "2026-06-17T02:00:23Z"
+  lastPrimaryFailureTime: "2026-06-17T18:44:22Z"
+  lastRestoreTime: "2026-06-14T17:15:17Z"
+  observedRestoreRequestId: clean-pitr-proof-1781457246
+  pgbouncerEnabled: true
+  pgbouncerPhase: Available
+  pgbouncerService: sample-postgres-pgbouncer
+  phase: Running
+  postgresPod: sample-postgres-0
+  primaryPod: sample-postgres-0
+  ready: true
+  restoreBackupId: 20260614T185602
+  restoreMessage: restore is disabled
+  restorePhase: Disabled
+  restoreTargetTime: "2026-06-14T17:09:54Z"
+  standbyPods:
+  - sample-postgres-standby-0
